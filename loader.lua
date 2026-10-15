@@ -1,4 +1,4 @@
--- AeroV4 Lite: pinned upstream UI, 10-module allowlist for BedWars.
+-- AeroV4 Lite: pinned upstream UI, 11-module allowlist for BedWars.
 -- This repository does not contain or redistribute the upstream UI or module sources.
 -- Upstream: https://github.com/wrealaero/aerov4
 
@@ -219,7 +219,8 @@ local filterCode = [==[
             ESP = true,
             BedPlates = true,
             HitFix = true,
-            FPSBoost = true
+            FPSBoost = true,
+            AutoTool = true
         }
         local keepCategories = {
             Main = true,
