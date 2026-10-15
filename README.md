@@ -51,6 +51,16 @@ The selected HitFix adapter is the only one used during a given load. Its patch 
 
 **Not verified end to end:** no tests have been run in a live Roblox BedWars client using Potassium or Real. The pinned upstream module code and local static checks do not guarantee that HitFix—or every other module—works on all executor versions or after game updates.
 
+## Startup behavior: all modules OFF by default
+
+**Every session starts with all 10 modules disabled**, even if their saved profile state was enabled previously. The original UI still restores saved sliders, colors, dropdown selections and keybinds. Modules only activate after you manually turn them on; loading or changing profiles does not auto-activate a saved module. The loader also disables any module that upstream might have activated during setup. This is enforced in both normal and Legit module profile loading.
+
+## Unsupported-executor error notification
+
+The executor check runs before file writes. If neither Potassium nor Real is detected (or if essential HitFix APIs are unavailable), the loader attempts to uninject an existing AeroV4 instance, **stops**, and displays a red **top-right** message for roughly 18 seconds. It first tries Roblox PlayerGui so the notification is independent of AeroV4's own notification settings; if UI construction fails, it attempts Roblox's built-in notification API. The original AeroV4 notification system remains available for regular module messages.
+
+**Verification limit:** source inspection and static tests confirm the display code and startup gate, but a rendered notification and executor-specific behavior have not been tested in a running Roblox client.
+
 ## Testing and troubleshooting
 
 - Check that the raw loader URL returns Lua text, not a 404.
