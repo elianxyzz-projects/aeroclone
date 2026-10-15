@@ -41,13 +41,14 @@ local function rejectAndUninject(message)
     -- Independent top-right error: survives AeroV4 Uninject.
     local ok, err = pcall(function()
         local parent
-        if type(gethui) == 'function' then
+        -- PlayerGui is preferred for a visible client-side top-right error.
+        local player = game:GetService('Players').LocalPlayer
+        parent = player and player:FindFirstChildOfClass('PlayerGui')
+        if not parent and type(gethui) == 'function' then
             local good, gui = pcall(gethui)
-            if good and gui then parent = gui end
-        end
-        if not parent then
-            local player = game:GetService('Players').LocalPlayer
-            parent = player and player:FindFirstChildOfClass('PlayerGui')
+            if good and typeof(gui) == 'Instance' and not gui:IsA('ScreenGui') then
+                parent = gui
+            end
         end
         if not parent then parent = game:GetService('CoreGui') end
 
@@ -58,6 +59,7 @@ local function rejectAndUninject(message)
         screen.IgnoreGuiInset = true
         screen.ResetOnSpawn = false
         screen.DisplayOrder = 999999
+        screen.ZIndexBehavior = Enum.ZIndexBehavior.Global
         screen.Parent = parent
 
         local frame = Instance.new('Frame')
@@ -257,6 +259,23 @@ local filterCode = [==[
         pruneModules(vape.Modules)
         if vape.Legit then pruneModules(vape.Legit.Modules) end
 
+        -- Keep every module OFF before saved profile options are loaded.
+        -- The user must explicitly enable a module through the UI.
+        local function stopEnabledModules(modules)
+            if type(modules) ~= 'table' then return end
+            for _, module in pairs(modules) do
+                if module.Enabled and type(module.Toggle) == 'function' then
+                    local ok, err = pcall(function() module:Toggle() end)
+                    if not ok then
+                        warn('[AeroV4 Lite] Could not disable active module: ' .. tostring(err))
+                    end
+                end
+            end
+        end
+        stopEnabledModules(vape.Modules)
+        if vape.Legit then stopEnabledModules(vape.Legit.Modules) end
+        vape.ManualEnableOnly = true
+
         -- Keep internal categories for friend/target settings and other dependencies.
         if type(vape.Categories) == 'table' then
             for categoryName, category in pairs(vape.Categories) do
@@ -328,7 +347,29 @@ end
 
 -- Fetch the original GUI, universal modules and selected BedWars game code.
 writefile('aerov4/main.lua', newMain)
-writefile('aerov4/guis/new.lua', getUpstream('guis/new.lua'))
+-- Do not auto-enable modules from previously saved configs (including profile changes).
+-- Preserve all original GUI, option loading, keybinds, colors and manual toggles.
+local originalGui = getUpstream('guis/new.lua')
+local function preventProfileAutoEnable(source, originalCondition, patchedCondition, label)
+    local first = source:find(originalCondition, 1, true)
+    if not first or source:find(originalCondition, first + #originalCondition, true) then
+        error('[AeroV4 Lite] Unrecognized upstream GUI profile toggle: ' .. label)
+    end
+    return source:sub(1, first - 1) .. patchedCondition .. source:sub(first + #originalCondition)
+end
+originalGui = preventProfileAutoEnable(
+    originalGui,
+    'if v.Enabled ~= object.Enabled then',
+    'if not self.ManualEnableOnly and v.Enabled ~= object.Enabled then',
+    'normal modules'
+)
+originalGui = preventProfileAutoEnable(
+    originalGui,
+    'if object.Enabled ~= (v.Enabled or false) then',
+    'if not self.ManualEnableOnly and object.Enabled ~= (v.Enabled or false) then',
+    'legit modules'
+)
+writefile('aerov4/guis/new.lua', originalGui)
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
 
