@@ -4,6 +4,143 @@
 
 repeat task.wait() until game:IsLoaded()
 
+-- Verify executor identity before downloading, running modules, or modifying any files.
+-- Only exact name prefixes are allowed; names are case-insensitive.
+local function executorFamily(name)
+    if type(name) ~= 'string' then return nil end
+    local normal = name:lower():match('^%s*(.-)%s*$')
+    if normal == 'potassium' or normal:match('^potassium[%s%p]') then return 'Potassium' end
+    if normal == 'real' or normal:match('^real[%s%p]') then return 'Real' end
+    return nil
+end
+
+local detectedName = 'Unknown'
+local executorKind
+if type(identifyexecutor) == 'function' then
+    local ok, name = pcall(identifyexecutor)
+    if ok and type(name) == 'string' then
+        detectedName = name
+        executorKind = executorFamily(name)
+    end
+end
+-- Real also documents getexecutorname(); use it only as a fallback.
+if not executorKind and type(getexecutorname) == 'function' then
+    local ok, name = pcall(getexecutorname)
+    if ok and type(name) == 'string' then
+        detectedName = name
+        executorKind = executorFamily(name)
+    end
+end
+
+local function rejectAndUninject(message)
+    -- Unload any previously running copy; this invocation has not injected yet.
+    if type(shared) == 'table' and type(shared.vape) == 'table'
+        and type(shared.vape.Uninject) == 'function' then
+        pcall(function() shared.vape:Uninject() end)
+    end
+    -- Independent top-right error: survives AeroV4 Uninject.
+    local ok, err = pcall(function()
+        local parent
+        if type(gethui) == 'function' then
+            local good, gui = pcall(gethui)
+            if good and gui then parent = gui end
+        end
+        if not parent then
+            local player = game:GetService('Players').LocalPlayer
+            parent = player and player:FindFirstChildOfClass('PlayerGui')
+        end
+        if not parent then parent = game:GetService('CoreGui') end
+
+        local existing = parent:FindFirstChild('AeroV4LiteExecutorError')
+        if existing then existing:Destroy() end
+        local screen = Instance.new('ScreenGui')
+        screen.Name = 'AeroV4LiteExecutorError'
+        screen.IgnoreGuiInset = true
+        screen.ResetOnSpawn = false
+        screen.DisplayOrder = 999999
+        screen.Parent = parent
+
+        local frame = Instance.new('Frame')
+        frame.AnchorPoint = Vector2.new(1, 0)
+        frame.Position = UDim2.new(1, -16, 0, 20)
+        frame.Size = UDim2.fromOffset(350, 84)
+        frame.BackgroundColor3 = Color3.fromRGB(37, 30, 32)
+        frame.BorderSizePixel = 0
+        frame.Parent = screen
+        local corner = Instance.new('UICorner')
+        corner.CornerRadius = UDim.new(0, 9)
+        corner.Parent = frame
+        local stripe = Instance.new('Frame')
+        stripe.Size = UDim2.fromOffset(4, 84)
+        stripe.BackgroundColor3 = Color3.fromRGB(236, 79, 92)
+        stripe.BorderSizePixel = 0
+        stripe.Parent = frame
+        local title = Instance.new('TextLabel')
+        title.BackgroundTransparency = 1
+        title.Position = UDim2.fromOffset(15, 7)
+        title.Size = UDim2.new(1, -26, 0, 25)
+        title.Font = Enum.Font.GothamBold
+        title.TextSize = 15
+        title.TextColor3 = Color3.fromRGB(255, 115, 125)
+        title.TextXAlignment = Enum.TextXAlignment.Left
+        title.Text = 'AeroV4 Lite - Unsupported executor'
+        title.Parent = frame
+        local detail = Instance.new('TextLabel')
+        detail.BackgroundTransparency = 1
+        detail.Position = UDim2.fromOffset(15, 32)
+        detail.Size = UDim2.new(1, -26, 0, 43)
+        detail.Font = Enum.Font.Gotham
+        detail.TextSize = 12
+        detail.TextWrapped = true
+        detail.TextXAlignment = Enum.TextXAlignment.Left
+        detail.TextYAlignment = Enum.TextYAlignment.Top
+        detail.TextColor3 = Color3.fromRGB(232, 225, 225)
+        detail.Text = message
+        detail.Parent = frame
+        task.delay(18, function()
+            if screen and screen.Parent then screen:Destroy() end
+        end)
+    end)
+    if not ok then
+        warn('[AeroV4 Lite] Could not display top-right error: ' .. tostring(err))
+        pcall(function()
+            game:GetService('StarterGui'):SetCore('SendNotification', {
+                Title = 'AeroV4 Lite: Unsupported executor',
+                Text = message,
+                Duration = 15
+            })
+        end)
+    end
+    warn('[AeroV4 Lite] Load aborted and existing instance uninject attempted: ' .. message)
+end
+
+if not executorKind then
+    rejectAndUninject('Only Potassium and Real are supported. Detected: ' .. detectedName .. '. Nothing was loaded.')
+    return nil
+end
+
+-- Both executor API references document these operations, but not every build implements them.
+local function selectedHitFixAPIs()
+    if type(debug) ~= 'table' then return false end
+    if executorKind == 'Potassium' then
+        return type(debug.getconstant) == 'function'
+            and type(debug.setconstant) == 'function'
+            and type(debug.getupvalue) == 'function'
+            and type(debug.setupvalue) == 'function'
+    end
+    return type(getconstant or debug.getconstant) == 'function'
+        and type(setconstant or debug.setconstant) == 'function'
+        and type(getupvalue or debug.getupvalue) == 'function'
+        and type(setupvalue or debug.setupvalue) == 'function'
+end
+if not selectedHitFixAPIs() then
+    rejectAndUninject(executorKind .. ' lacks required HitFix debug APIs. Nothing was loaded.')
+    return nil
+end
+
+print('[AeroV4 Lite] Selected executor: ' .. executorKind)
+
+
 -- The module set below is specific to Roblox BedWars.
 local BEDWARS_GAME_ID = 2619619496
 if game.GameId ~= BEDWARS_GAME_ID then
@@ -27,19 +164,7 @@ for _, fnName in ipairs({
     end
 end
 
-if type(debug) ~= 'table'
-    or type(debug.getconstant) ~= 'function'
-    or type(debug.setconstant) ~= 'function'
-    or type(debug.setupvalue) ~= 'function' then
-    warn('[AeroV4 Lite] HitFix may not work: missing debug constant/upvalue APIs.')
-end
-
-local executorName = 'unknown'
-if type(identifyexecutor) == 'function' then
-    local ok, result = pcall(identifyexecutor)
-    if ok and type(result) == 'string' then executorName = result end
-end
-print('[AeroV4 Lite] Starting original AeroV4 UI on ' .. executorName)
+print('[AeroV4 Lite] Starting original AeroV4 UI on ' .. executorKind)
 
 if SELF_URL ~= nil and (type(SELF_URL) ~= 'string'
     or not SELF_URL:match('^https://raw%.githubusercontent%.com/.+/loader%.lua$')) then
@@ -206,9 +331,124 @@ writefile('aerov4/main.lua', newMain)
 writefile('aerov4/guis/new.lua', getUpstream('guis/new.lua'))
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
+
+-- Match the single original HitFix registration block from the pinned BedWars version.
+-- Select one API implementation at load-time (never run both).
+local function patchHitFix(bedwarsSource)
+    bedwarsSource = bedwarsSource:gsub('\r\n', '\n')
+    local oldStart = 'run(function()\n\tlocal Hitfix '
+    local oldNext = '\nrun(function()\n\tlocal Interface'
+    local first = bedwarsSource:find(oldStart, 1, true)
+    local following = first and bedwarsSource:find(oldNext, first, true)
+    if not first or not following then
+        error('[AeroV4 Lite] HitFix upstream registration changed; refusing to run unverified patch.')
+    end
+    local originalBlock = bedwarsSource:sub(first, following - 1)
+    if not originalBlock:find("Name = 'HitFix'", 1, true)
+        or not originalBlock:find('debug.getconstant', 1, true)
+        or not originalBlock:find('debug.setupvalue', 1, true) then
+        error('[AeroV4 Lite] Unexpected HitFix block. Refusing to load.')
+    end
+
+    local apiGetConstant, apiSetConstant, apiGetUpvalue, apiSetUpvalue
+    if executorKind == 'Potassium' then
+        apiGetConstant, apiSetConstant = 'debug.getconstant', 'debug.setconstant'
+        apiGetUpvalue, apiSetUpvalue = 'debug.getupvalue', 'debug.setupvalue'
+    elseif executorKind == 'Real' then
+        apiGetConstant, apiSetConstant = '(getconstant or debug.getconstant)', '(setconstant or debug.setconstant)'
+        apiGetUpvalue, apiSetUpvalue = '(getupvalue or debug.getupvalue)', '(setupvalue or debug.setupvalue)'
+    else
+        error('[AeroV4 Lite] Invalid HitFix executor adapter')
+    end
+
+    local code = [==[
+run(function()
+    local getConstant = __GET_CONSTANT__
+    local setConstant = __SET_CONSTANT__
+    local getUpvalue = __GET_UPVALUE__
+    local setUpvalue = __SET_UPVALUE__
+    local saved = setmetatable({}, {__mode = 'k'})
+    local HitFix
+
+    local function findState(func)
+        local state = saved[func]
+        if state then return state end
+        local index, originalConstant
+        for i = 1, 80 do
+            local ok, value = pcall(getConstant, func, i)
+            if not ok then break end
+            if value == 'Raycast' or value == 'raycast' then
+                index, originalConstant = i, value
+                break
+            end
+        end
+        if not index then
+            warn('[AeroV4 Lite HitFix] Raycast constant not found: module unchanged')
+            return nil
+        end
+        local ok, originalUpvalue = pcall(getUpvalue, func, 4)
+        if not ok then
+            warn('[AeroV4 Lite HitFix] Upvalue 4 not readable: module unchanged')
+            return nil
+        end
+        state = {
+            index = index,
+            originalConstant = originalConstant,
+            originalUpvalue = originalUpvalue
+        }
+        saved[func] = state
+        return state
+    end
+
+    HitFix = vape.Categories.Legit:CreateModule({
+        Name = 'HitFix',
+        Function = function(enabled)
+            local controller = bedwars.SwordController
+            local func = controller and controller.swingSwordAtMouse
+            if type(func) ~= 'function' then
+                warn('[AeroV4 Lite HitFix] Sword swing function unavailable')
+                return
+            end
+            local state = findState(func)
+            if not state then return end
+
+            local nextConstant = enabled and 'raycast' or state.originalConstant
+            local nextUpvalue = enabled and bedwars.QueryUtil or state.originalUpvalue
+            local constantOK, constantError = pcall(setConstant, func, state.index, nextConstant)
+            local upvalueOK, upvalueError = pcall(setUpvalue, func, 4, nextUpvalue)
+
+            if not constantOK or not upvalueOK then
+                warn('[AeroV4 Lite HitFix] Failed to apply ' .. tostring(enabled)
+                    .. ': ' .. tostring(constantError or upvalueError))
+                -- Avoid leaving only half the modification applied.
+                pcall(setConstant, func, state.index, state.originalConstant)
+                pcall(setUpvalue, func, 4, state.originalUpvalue)
+            end
+        end
+    })
+end)
+]==]
+    local substitutions = {
+        ['__GET_CONSTANT__'] = apiGetConstant,
+        ['__SET_CONSTANT__'] = apiSetConstant,
+        ['__GET_UPVALUE__'] = apiGetUpvalue,
+        ['__SET_UPVALUE__'] = apiSetUpvalue
+    }
+    for marker, value in pairs(substitutions) do
+        code = code:gsub(marker, function() return value end)
+    end
+    if code:find('__GET_') or code:find('__SET_') then
+        error('[AeroV4 Lite] Incomplete HitFix adaptation')
+    end
+    return bedwarsSource:sub(1, first - 1) .. code .. bedwarsSource:sub(following + 1)
+end
+
 local gameFileId = (game.PlaceId == 6872265039) and 6872265039 or 6872274481
-writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua',
-    getUpstream('games/' .. tostring(gameFileId) .. '.lua'))
+local bedwarsSource = getUpstream('games/' .. tostring(gameFileId) .. '.lua')
+if gameFileId == 6872274481 then
+    bedwarsSource = patchHitFix(bedwarsSource)
+end
+writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
 local originalDownloader = getUpstream('downloader.lua')
 local runDownloader, compileError = loadstring(originalDownloader, 'aerov4-lite-downloader')
