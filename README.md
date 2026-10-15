@@ -51,9 +51,13 @@ The selected HitFix adapter is the only one used during a given load. Its patch 
 
 **Not verified end to end:** no tests have been run in a live Roblox BedWars client using Potassium or Real. The pinned upstream module code and local static checks do not guarantee that HitFix—or every other module—works on all executor versions or after game updates.
 
-## Startup behavior: all modules OFF by default
+## Config saving and first-run behavior
 
-**Every session starts with all 10 modules disabled**, even if their saved profile state was enabled previously. The original UI still restores saved sliders, colors, dropdown selections and keybinds. Modules only activate after you manually turn them on; loading or changing profiles does not auto-activate a saved module. The loader also disables any module that upstream might have activated during setup. This is enforced in both normal and Legit module profile loading.
+**Fresh installation / new profile:** Every module starts OFF if no saved configuration exists. You can enable whichever modules you want manually. Any modules that upstream activated during registration are turned off before loading the profile.
+
+**Existing saved profile:** The original AeroV4 loader restores the saved `Enabled` state of each module, including the Legit tab, as well as sliders, dropdowns, colors, and keybinds. After you enable modules and the profile is saved, they automatically turn on again when you next launch or select that profile. The original periodic autosave still runs approximately every 10 seconds while loaded.
+
+This fixes the temporary version that forced every module off on every launch. **Previously overwritten profiles cannot be reconstructed automatically:** if that version saved `Enabled = false` over your earlier preferences, you'll need to turn the modules back on once (or restore your own backup), and the saved state will then persist normally.
 
 ## Unsupported-executor error notification
 
