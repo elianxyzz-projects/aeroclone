@@ -259,8 +259,9 @@ local filterCode = [==[
         pruneModules(vape.Modules)
         if vape.Legit then pruneModules(vape.Legit.Modules) end
 
-        -- Keep every module OFF before saved profile options are loaded.
-        -- The user must explicitly enable a module through the UI.
+        -- Disable registration-time defaults before the original profile loader runs.
+        -- Fresh profiles therefore start OFF; existing profiles then restore
+        -- their saved Enabled values, along with all options and keybinds.
         local function stopEnabledModules(modules)
             if type(modules) ~= 'table' then return end
             for _, module in pairs(modules) do
@@ -274,7 +275,6 @@ local filterCode = [==[
         end
         stopEnabledModules(vape.Modules)
         if vape.Legit then stopEnabledModules(vape.Legit.Modules) end
-        vape.ManualEnableOnly = true
 
         -- Keep internal categories for friend/target settings and other dependencies.
         if type(vape.Categories) == 'table' then
@@ -347,29 +347,10 @@ end
 
 -- Fetch the original GUI, universal modules and selected BedWars game code.
 writefile('aerov4/main.lua', newMain)
--- Do not auto-enable modules from previously saved configs (including profile changes).
--- Preserve all original GUI, option loading, keybinds, colors and manual toggles.
-local originalGui = getUpstream('guis/new.lua')
-local function preventProfileAutoEnable(source, originalCondition, patchedCondition, label)
-    local first = source:find(originalCondition, 1, true)
-    if not first or source:find(originalCondition, first + #originalCondition, true) then
-        error('[AeroV4 Lite] Unrecognized upstream GUI profile toggle: ' .. label)
-    end
-    return source:sub(1, first - 1) .. patchedCondition .. source:sub(first + #originalCondition)
-end
-originalGui = preventProfileAutoEnable(
-    originalGui,
-    'if v.Enabled ~= object.Enabled then',
-    'if not self.ManualEnableOnly and v.Enabled ~= object.Enabled then',
-    'normal modules'
-)
-originalGui = preventProfileAutoEnable(
-    originalGui,
-    'if object.Enabled ~= (v.Enabled or false) then',
-    'if not self.ManualEnableOnly and object.Enabled ~= (v.Enabled or false) then',
-    'legit modules'
-)
-writefile('aerov4/guis/new.lua', originalGui)
+-- Use the original GUI profile loader without changing its saved Enabled states.
+-- No saved profile -> modules stay disabled; saved profile -> prior enabled
+-- module choices and all settings are restored automatically.
+writefile('aerov4/guis/new.lua', getUpstream('guis/new.lua'))
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
 
