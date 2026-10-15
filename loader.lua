@@ -351,7 +351,54 @@ writefile('aerov4/main.lua', newMain)
 -- Use the original GUI profile loader without changing its saved Enabled states.
 -- No saved profile -> modules stay disabled; saved profile -> prior enabled
 -- module choices and all settings are restored automatically.
-writefile('aerov4/guis/new.lua', getUpstream('guis/new.lua'))
+-- Load the supplied Elian banner as a local custom asset.
+local imageURL = 'https://raw.githubusercontent.com/elianxyzz-projects/aeroclone/main/assets/elian.png'
+local imageOK, imageBytes = pcall(function() return game:HttpGet(imageURL, true) end)
+if imageOK and type(imageBytes) == 'string' and #imageBytes > 1000 then
+    writefile('aerov4/assets/new/elian.png', imageBytes)
+else
+    warn('[AeroV4 Lite] Could not download custom Elian banner')
+end
+
+local customGUI = getUpstream('guis/new.lua')
+-- Replace only the main GUI branding and its Settings pane styling.
+local oldLogo = "logo.Image = getcustomasset('aerov4/assets/new/guivape.png')"
+local newLogo = "logo.Image = getcustomasset('aerov4/assets/new/elian.png')"
+customGUI = replaceOnce(customGUI, oldLogo, newLogo, 'main GUI logo')
+customGUI = replaceOnce(customGUI,
+    "logov4.Parent = logo",
+    "logov4.Visible = false\n\tlogov4.Parent = logo",
+    'legacy V4 logo overlay')
+customGUI = replaceOnce(customGUI,
+    "logo.Size = UDim2.fromOffset(62, 18)",
+    "logo.Size = UDim2.fromOffset(94, 56)",
+    'main GUI logo dimensions')
+customGUI = replaceOnce(customGUI,
+    "logo.Position = UDim2.fromOffset(11, 10)",
+    "logo.Position = UDim2.fromOffset(10, 2)",
+    'main GUI logo position')
+customGUI = replaceOnce(customGUI,
+    "logo.ImageColor3 = select(3, uipallet.Main:ToHSV()) > 0.5 and uipallet.Text or Color3.new(1, 1, 1)",
+    "logo.ImageColor3 = Color3.new(1, 1, 1)\n\tlogo.ScaleType = Enum.ScaleType.Fit",
+    'main GUI image color')
+customGUI = replaceOnce(customGUI,
+    "settingspane.Parent = window",
+    [[settingspane.Parent = window
+    settingspane.BackgroundColor3 = Color3.fromRGB(5, 38, 112)
+    local blueGradient = Instance.new('UIGradient')
+    blueGradient.Rotation = 90
+    blueGradient.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, Color3.fromRGB(5, 34, 132)),
+        ColorSequenceKeypoint.new(0.48, Color3.fromRGB(0, 109, 232)),
+        ColorSequenceKeypoint.new(1, Color3.fromRGB(21, 195, 241))
+    })
+    blueGradient.Parent = settingspane]],
+    'Settings background')
+customGUI = replaceOnce(customGUI,
+    "settingschildren.BackgroundColor3 = uipallet.Main",
+    "settingschildren.BackgroundColor3 = Color3.fromRGB(5, 57, 144)\n\tlocal childrenGradient = Instance.new('UIGradient')\n\tchildrenGradient.Rotation = 90\n\tchildrenGradient.Color = ColorSequence.new(Color3.fromRGB(6, 69, 178), Color3.fromRGB(2, 150, 216))\n\tchildrenGradient.Parent = settingschildren",
+    'Settings content background')
+writefile('aerov4/guis/new.lua', customGUI)
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
 
