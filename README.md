@@ -38,11 +38,18 @@ Source: [loader.lua](./loader.lua) — the script the loadstring fetches.
 
 This script modifies the executor's **aerov4/** file cache. Back up original profiles before mixing it with an unmodified AeroV4 installation, and don't run both in the same game session.
 
-## Potassium and Real
+## Potassium and Real — enforced executor check
 
-This loader uses common executor functions (getgenv, readfile, writefile, isfile, makefolder, loadstring, game:HttpGet) and checks for missing filesystem functions before writing its cache. HitFix needs constant/upvalue debug APIs (debug.getconstant, debug.setconstant, debug.setupvalue); the script warns if they are missing. Other features may have additional executor-specific dependencies.
+At startup, the loader checks identifyexecutor(), with getexecutorname() as a fallback if the first name is unavailable or unsupported. Executor name detection is case-insensitive and accepts only Potassium or Real.
 
-**Not verified end to end:** no tests have been run in a live Roblox BedWars client using Potassium or Real. Local compile/mocked-module tests do not guarantee that all game-specific features function on every executor or future client update.
+- **Potassium:** HitFix uses Potassium's documented debug.getconstant, debug.setconstant, debug.getupvalue and debug.setupvalue APIs.
+- **Real:** HitFix uses Real's documented getconstant, setconstant, getupvalue and setupvalue APIs (falling back to Real's debug.* aliases).
+- **Any other executor or an unknown name:** the loader attempts to uninject any existing AeroV4 interface, displays a red error in the upper-right for 18 seconds, and stops before downloading modules or modifying cached files.
+- **A supported executor missing essential HitFix APIs:** likewise stops and displays an error rather than offering a broken HitFix module.
+
+The selected HitFix adapter is the only one used during a given load. Its patch still targets the original BedWars sword-swing function, and now records/restores the original constant and upvalue when disabled. Settings are preserved. The loader also validates basic filesystem functions before caching.
+
+**Not verified end to end:** no tests have been run in a live Roblox BedWars client using Potassium or Real. The pinned upstream module code and local static checks do not guarantee that HitFix—or every other module—works on all executor versions or after game updates.
 
 ## Testing and troubleshooting
 
