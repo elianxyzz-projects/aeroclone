@@ -292,7 +292,13 @@ local filterCode = [==[
                 end
                 local experimental = self.Categories and self.Categories['Experimental (Ban)']
                 if experimental and experimental.Button then
-                    if experimental.Button.Object then experimental.Button.Object.Visible = true end
+                    if experimental.Button.Object then
+                        local button = experimental.Button.Object
+                        button.Visible = true
+                        button.LayoutOrder = -1
+                        button.Text = '       Experimental (Ban)'
+                        button.TextSize = 13
+                    end
                     if experimentalFirstLoad then
                         experimentalFirstLoad = false
                         if not experimental.Button.Enabled then experimental.Button:Toggle() end
@@ -321,6 +327,40 @@ local newMain = replaceOnce(
     filterCode .. '\n\tfinishLoading()\nelse\n\tvape.Init = finishLoading',
     'load-before-finish insertion point'
 )
+
+-- Register the experimental category through the initialized GUI API.
+newMain = replaceOnce(newMain,
+    "shared.vape = vape\ntask.wait(0.1)",
+    [==[shared.vape = vape
+task.wait(0.1)
+
+-- Register the category on the actual initialized GUI, before modules load.
+do
+    local name = 'Experimental (Ban)'
+    if not vape.Categories[name] then
+        local template = vape.Categories.Blatant
+        local icon = template and template.Button and template.Button.Icon
+        local experimental = vape:CreateCategory({
+            Name = name,
+            Icon = icon and icon.Image or '',
+            Size = UDim2.fromOffset(14, 14)
+        })
+        experimental.Object.Position = UDim2.fromOffset(466, 120)
+    end
+    local experimental = vape.Categories[name]
+    if experimental and experimental.Button and experimental.Button.Object then
+        local button = experimental.Button.Object
+        button.Visible = true
+        button.Text = '       Experimental (Ban)'
+        button.TextSize = 13
+        button.LayoutOrder = -1
+        experimental.Object.Title.TextSize = 11
+        print('[AeroV4 Lite] Experimental category registered.')
+    else
+        warn('[AeroV4 Lite] Experimental category registration failed.')
+    end
+end]==],
+    'runtime experimental category registration')
 
 -- Ensure teleport reloads return to this Lite build instead of full upstream.
 if SELF_URL then
@@ -401,10 +441,6 @@ customGUI = replaceOnce(customGUI,
     "scarcitybanner.Text = 'shitty ass aerov4 script gang gang'",
     "scarcitybanner.Text = ''",
     'bottom banner text')
-customGUI = replaceOnce(customGUI,
-    "mainapi.Categories.Main:CreateDivider('misc')",
-    "if game.GameId == 2619619496 then\n    mainapi:CreateCategory({\n        Name = 'Experimental (Ban)',\n        Icon = getcustomasset('aerov4/assets/new/blatanticon.png'),\n        Size = UDim2.fromOffset(14, 14)\n    })\n    local experimental = mainapi.Categories['Experimental (Ban)']\n    if experimental and experimental.Object then\n        experimental.Object.Position = UDim2.fromOffset(466, 120)\n        if experimental.Button and experimental.Button.Object then\n            experimental.Button.Object.Visible = true\n        end\n    end\nend\nmainapi.Categories.Main:CreateDivider('misc')",
-    'experimental category')
 writefile('aerov4/guis/new.lua', customGUI)
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
@@ -595,6 +631,7 @@ if gameFileId == 6872274481 then
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
+print('[AeroV4 Lite] Build: experimental-category-runtime-v2')
 local originalDownloader = getUpstream('downloader.lua')
 local runDownloader, compileError = loadstring(originalDownloader, 'aerov4-lite-downloader')
 if not runDownloader then
