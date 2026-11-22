@@ -447,6 +447,23 @@ run(function()
     local totalSent, totalBlocked, totalConfirmed = 0, 0, 0
     local confirmedTimes = {}
     local peakConfirmed = 0
+    local gapStats = {}
+    local function recordGap(kind, now)
+        local stat = gapStats[kind]
+        if not stat then
+            stat = {last = now, max = 0, pauses = 0}
+            gapStats[kind] = stat
+            return
+        end
+        local gap = now - stat.last
+        stat.last = now
+        stat.max = math.max(stat.max, gap)
+        if gap > 0.45 then stat.pauses += 1 end
+    end
+    local function gapSummary(kind)
+        local stat = gapStats[kind]
+        return stat and string.format('%dms (%d pauses)', math.floor(stat.max * 1000 + 0.5), stat.pauses) or 'n/a'
+    end
     local function rateValue()
         return math.clamp(math.floor(tonumber(Rate and Rate.Value) or 36), 0, 36)
     end
@@ -483,6 +500,7 @@ run(function()
         sent, blocked, confirmed = 0, 0, 0
         totalSent, totalBlocked, totalConfirmed = 0, 0, 0
         peakConfirmed = 0
+        table.clear(gapStats)
         table.clear(confirmedTimes)
     end
 
@@ -502,6 +520,13 @@ run(function()
         sessionNotice(string.format(
             'Stopped | %.1fs active | %d damage hits | %d sent, %d blocked | Peak 10s: %d hits',
             duration, totalConfirmed, totalSent, totalBlocked, peakConfirmed))
+        local gaps = 'Longest gaps: input ' .. gapSummary('input')
+            .. ', attempts ' .. gapSummary('attempt')
+            .. ', sent ' .. gapSummary('sent')
+            .. ', damage ' .. gapSummary('damage')
+        print('[AeroLite HitReg] ' .. gaps)
+        print(string.format('[AeroLite HitReg] Session totals: %d sent, %d blocked, %d damage hits.',
+            totalSent, totalBlocked, totalConfirmed))
         resetSession()
     end
 
@@ -571,7 +596,9 @@ run(function()
         local state = {controller = controller, original = original}
         state.wrapper = function(...)
             if HitReg and HitReg.Enabled then
-                noteActivity(os.clock())
+                local now = os.clock()
+                noteActivity(now)
+                recordGap('attempt', now)
                 if not allowHit() then
                     blocked += 1
                     totalBlocked += 1
@@ -579,6 +606,7 @@ run(function()
                 end
                 sent += 1
                 totalSent += 1
+                recordGap('sent', now)
             end
             return original(...)
         end
@@ -671,7 +699,9 @@ run(function()
                 resetSession()
                 HitReg:Clean(inputService.InputBegan:Connect(function(input, processed)
                     if not processed and input.UserInputType == Enum.UserInputType.MouseButton1 then
-                        noteActivity(os.clock())
+                        local now = os.clock()
+                        noteActivity(now)
+                        recordGap('input', now)
                     end
                 end))
                 HitReg:Clean(vapeEvents.EntityDamageEvent.Event:Connect(function(hit)
@@ -682,6 +712,7 @@ run(function()
                         or (tonumber(hit.damage) or 0) <= 0 then return end
                     local now = os.clock()
                     tickWindow(now)
+                    recordGap('damage', now)
                     confirmed += 1
                     totalConfirmed += 1
                     confirmedTimes[#confirmedTimes + 1] = now
