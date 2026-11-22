@@ -204,7 +204,9 @@ local filterCode = [==[
             ESP = true,
             BedPlates = true,
             FPSBoost = true,
-            AutoTool = true
+            AutoTool = true,
+            Freecam = true,
+            FOV = true
         }
         local keepCategories = {
             Main = true,
@@ -244,6 +246,176 @@ local filterCode = [==[
 
         pruneModules(vape.Modules)
         if vape.Legit then pruneModules(vape.Legit.Modules) end
+
+        -- Self-contained camera tools; registered before saved profiles are restored.
+        -- These change only the local camera, not gameplay or server state.
+        do
+            local runService = game:GetService('RunService')
+            local input = game:GetService('UserInputService')
+            local cameraState
+            local freecamConnections = {}
+            local keys = {}
+            local rightMouseDown = false
+            local freecamSpeed
+            local Freecam
+
+            local function disconnectFreecam()
+                for _, connection in ipairs(freecamConnections) do
+                    connection:Disconnect()
+                end
+                table.clear(freecamConnections)
+                table.clear(keys)
+                rightMouseDown = false
+            end
+
+            local function stopFreecam()
+                disconnectFreecam()
+                if cameraState then
+                    local camera = workspace.CurrentCamera
+                    if camera then
+                        camera.CameraType = cameraState.cameraType
+                        camera.CameraSubject = cameraState.subject
+                        if cameraState.cameraType == Enum.CameraType.Scriptable then
+                            camera.CFrame = cameraState.cframe
+                        end
+                    end
+                    input.MouseBehavior = cameraState.mouseBehavior
+                    input.MouseIconEnabled = cameraState.mouseIconEnabled
+                    cameraState = nil
+                end
+            end
+
+            Freecam = vape.Categories.Legit:CreateModule({
+                Name = 'Freecam',
+                Tooltip = 'Move the local camera freely (WASD, Q/E up/down, hold right-click to look; Shift to speed up).',
+                Function = function()
+                    if not Freecam.Enabled then
+                        stopFreecam()
+                        return
+                    end
+                    stopFreecam()
+                    local camera = workspace.CurrentCamera
+                    if not camera then
+                        warn('[AeroV4 Lite] Freecam: no camera available')
+                        return
+                    end
+                    cameraState = {
+                        cameraType = camera.CameraType,
+                        subject = camera.CameraSubject,
+                        cframe = camera.CFrame,
+                        mouseBehavior = input.MouseBehavior,
+                        mouseIconEnabled = input.MouseIconEnabled
+                    }
+                    local position = camera.CFrame.Position
+                    local pitch, yaw = camera.CFrame:ToOrientation()
+                    camera.CameraType = Enum.CameraType.Scriptable
+
+                    freecamConnections[#freecamConnections + 1] = input.InputBegan:Connect(function(action, processed)
+                        if processed and action.UserInputType ~= Enum.UserInputType.MouseButton2 then return end
+                        if action.UserInputType == Enum.UserInputType.MouseButton2 then
+                            rightMouseDown = true
+                            input.MouseBehavior = Enum.MouseBehavior.LockCurrentPosition
+                            input.MouseIconEnabled = false
+                        elseif action.UserInputType == Enum.UserInputType.Keyboard then
+                            keys[action.KeyCode] = true
+                        end
+                    end)
+                    freecamConnections[#freecamConnections + 1] = input.InputEnded:Connect(function(action)
+                        if action.UserInputType == Enum.UserInputType.MouseButton2 then
+                            rightMouseDown = false
+                            if cameraState then
+                                input.MouseBehavior = cameraState.mouseBehavior
+                                input.MouseIconEnabled = cameraState.mouseIconEnabled
+                            end
+                        elseif action.UserInputType == Enum.UserInputType.Keyboard then
+                            keys[action.KeyCode] = nil
+                        end
+                    end)
+                    freecamConnections[#freecamConnections + 1] = runService.RenderStepped:Connect(function(dt)
+                        local current = workspace.CurrentCamera
+                        if not current then return end
+                        if rightMouseDown then
+                            local delta = input:GetMouseDelta()
+                            yaw = yaw - delta.X * 0.003
+                            pitch = math.clamp(pitch - delta.Y * 0.003, -math.pi / 2 + 0.01, math.pi / 2 - 0.01)
+                        end
+                        local rotation = CFrame.fromOrientation(pitch, yaw, 0)
+                        local vec = Vector3.zero
+                        if keys[Enum.KeyCode.W] then vec += Vector3.new(0, 0, -1) end
+                        if keys[Enum.KeyCode.S] then vec += Vector3.new(0, 0, 1) end
+                        if keys[Enum.KeyCode.A] then vec += Vector3.new(-1, 0, 0) end
+                        if keys[Enum.KeyCode.D] then vec += Vector3.new(1, 0, 0) end
+                        if keys[Enum.KeyCode.E] then vec += Vector3.new(0, 1, 0) end
+                        if keys[Enum.KeyCode.Q] then vec += Vector3.new(0, -1, 0) end
+                        if vec.Magnitude > 0 then
+                            local speed = freecamSpeed and freecamSpeed.Value or 32
+                            if keys[Enum.KeyCode.LeftShift] or keys[Enum.KeyCode.RightShift] then
+                                speed *= 2
+                            end
+                            position += rotation:VectorToWorldSpace(vec.Unit) * speed * math.min(dt, 0.1)
+                        end
+                        current.CameraType = Enum.CameraType.Scriptable
+                        current.CFrame = CFrame.new(position) * rotation
+                    end)
+                end
+            })
+            freecamSpeed = Freecam:CreateSlider({
+                Name = 'Speed',
+                Min = 5,
+                Max = 150,
+                Default = 32,
+                Function = function() end
+            })
+            vape:Clean(stopFreecam)
+
+            local FOV
+            local fovSlider
+            local originalFOV
+            local fovConnection
+            local function stopFOV()
+                if fovConnection then
+                    fovConnection:Disconnect()
+                    fovConnection = nil
+                end
+                if originalFOV then
+                    local current = workspace.CurrentCamera
+                    if current then current.FieldOfView = originalFOV end
+                    originalFOV = nil
+                end
+            end
+            FOV = vape.Categories.Legit:CreateModule({
+                Name = 'FOV',
+                Tooltip = 'Adjust the local camera field of view; restores the original FOV when disabled.',
+                Function = function()
+                    if not FOV.Enabled then
+                        stopFOV()
+                        return
+                    end
+                    stopFOV()
+                    local current = workspace.CurrentCamera
+                    if not current then return end
+                    originalFOV = current.FieldOfView
+                    current.FieldOfView = fovSlider and fovSlider.Value or 90
+                    fovConnection = workspace:GetPropertyChangedSignal('CurrentCamera'):Connect(function()
+                        if FOV.Enabled and workspace.CurrentCamera then
+                            workspace.CurrentCamera.FieldOfView = fovSlider.Value
+                        end
+                    end)
+                end
+            })
+            fovSlider = FOV:CreateSlider({
+                Name = 'Field of view',
+                Min = 40,
+                Max = 120,
+                Default = 90,
+                Function = function(value)
+                    if FOV.Enabled and workspace.CurrentCamera then
+                        workspace.CurrentCamera.FieldOfView = value
+                    end
+                end
+            })
+            vape:Clean(stopFOV)
+        end
 
         -- Disable registration-time defaults before the original profile loader runs.
         -- Fresh profiles therefore start OFF; existing profiles then restore
