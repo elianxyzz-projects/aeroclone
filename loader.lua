@@ -218,7 +218,8 @@ local filterCode = [==[
             World = true,
             Kits = true,
             Minigames = true,
-            Legit = true
+            Legit = true,
+            ['Experimental (Ban)'] = true
         }
         local function pruneModules(tab)
             if type(tab) ~= 'table' then return end
@@ -390,6 +391,10 @@ customGUI = replaceOnce(customGUI,
     "scarcitybanner.Text = 'shitty ass aerov4 script gang gang'",
     "scarcitybanner.Text = ''",
     'bottom banner text')
+customGUI = replaceOnce(customGUI,
+    "mainapi.Categories.Main:CreateDivider('misc')",
+    "if game.GameId == 2619619496 and game.PlaceId ~= 6872265039 then\n    mainapi:CreateCategory({\n        Name = 'Experimental (Ban)',\n        Icon = getcustomasset('aerov4/assets/new/blatanticon.png'),\n        Size = UDim2.fromOffset(14, 14)\n    })\n    local experimental = mainapi.Categories['Experimental (Ban)']\n    if experimental and experimental.Object then\n        experimental.Object.Position = UDim2.fromOffset(466, 120)\n    end\nend\nmainapi.Categories.Main:CreateDivider('misc')",
+    'experimental category')
 writefile('aerov4/guis/new.lua', customGUI)
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
@@ -420,8 +425,21 @@ local function addHitRegAdjuster(source)
     end
     local replacement = [==[
 run(function()
-    local HitFix, HitReg, Mode, Refresh, Notifications
+    local HitFix, HitReg, Mode, Refresh, Notifications, Rate
     local active
+    local hitTimes = {}
+    local function allowHit()
+        if not HitReg or not HitReg.Enabled then return true end
+        local limit = math.clamp(math.floor(tonumber(Rate and Rate.Value) or 36), 0, 36)
+        local now = os.clock()
+        while hitTimes[1] and now - hitTimes[1] >= 10 do
+            table.remove(hitTimes, 1)
+        end
+        if #hitTimes >= limit then return false end
+        if hitTimes[#hitTimes] and now - hitTimes[#hitTimes] < 10 / limit then return false end
+        hitTimes[#hitTimes + 1] = now
+        return true
+    end
     local getConstant = debug.getconstant or getconstant
     local setConstant = debug.setconstant or setconstant
     local getUpvalue = debug.getupvalue or getupvalue
@@ -501,19 +519,30 @@ run(function()
         Tooltip = 'Original AeroV4 query behavior. HitReg Adjuster takes priority when enabled.'
     })
 
-    HitReg = vape.Categories.Legit:CreateModule({
+    HitReg = vape.Categories['Experimental (Ban)']:CreateModule({
         Name = 'HitRegAdjuster',
-        Tooltip = 'Choose a client-side sword detection mode. Does not change server validation.',
+        Tooltip = 'Experimental. Caps outgoing sword-hit attempts per 10 seconds; does not change range or server validation. Third-party modifications risk a ban.',
         Function = function(enabled)
             reconcile(enabled)
             if enabled then
+                store.AeroLiteHitRegGate = allowHit
                 HitReg:Clean(lplr.CharacterAdded:Connect(function()
                     task.delay(0.5, function()
                         if HitReg.Enabled and Refresh and Refresh.Enabled then reconcile(false) end
                     end)
                 end))
+            elseif store.AeroLiteHitRegGate == allowHit then
+                store.AeroLiteHitRegGate = nil
             end
         end
+    })
+    Rate = HitReg:CreateSlider({
+        Name = 'Hits per 10 seconds',
+        Min = 0,
+        Max = 36,
+        Default = 36,
+        AeroLiteCap = true,
+        Decimal = 1
     })
     Mode = HitReg:CreateDropdown({
         Name = 'Mode',
@@ -531,7 +560,11 @@ run(function()
         Name = 'Notifications',
         Default = false
     })
-    vape:Clean(function() restore() end)
+    vape:Clean(function()
+        if store.AeroLiteHitRegGate == allowHit then store.AeroLiteHitRegGate = nil end
+        table.clear(hitTimes)
+        restore()
+    end)
 end)
 ]==]
     return source:sub(1, first - 1) .. replacement .. source:sub(last)
@@ -545,6 +578,10 @@ if gameFileId == 6872274481 then
     bedwarsSource = capSlider(bedwarsSource, 'Mine = Reach:CreateSlider({', 16)
     bedwarsSource = capSlider(bedwarsSource, 'FOV = SilentAim:CreateSlider({', 100)
     bedwarsSource = addHitRegAdjuster(bedwarsSource)
+    bedwarsSource = replaceOnce(bedwarsSource,
+        "\t\t\t\t\treturn call:SendToServer(attackTable, ...)",
+        "\t\t\t\t\tif store.AeroLiteHitRegGate and not store.AeroLiteHitRegGate() then return end\n\t\t\t\t\treturn call:SendToServer(attackTable, ...)",
+        'sword hit attempt cap')
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
