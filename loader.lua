@@ -1,4 +1,4 @@
--- AeroV4 Lite: pinned upstream UI, 11-module allowlist for BedWars.
+-- AeroV4 Lite: pinned upstream UI, module allowlist for BedWars.
 -- This repository does not contain or redistribute the upstream UI or module sources.
 -- Upstream: https://github.com/wrealaero/aerov4
 
@@ -121,25 +121,6 @@ if not executorKind then
     return nil
 end
 
--- Both executor API references document these operations, but not every build implements them.
-local function selectedHitFixAPIs()
-    if type(debug) ~= 'table' then return false end
-    if executorKind == 'Potassium' then
-        return type(debug.getconstant) == 'function'
-            and type(debug.setconstant) == 'function'
-            and type(debug.getupvalue) == 'function'
-            and type(debug.setupvalue) == 'function'
-    end
-    return type(getconstant or debug.getconstant) == 'function'
-        and type(setconstant or debug.setconstant) == 'function'
-        and type(getupvalue or debug.getupvalue) == 'function'
-        and type(setupvalue or debug.setupvalue) == 'function'
-end
-if not selectedHitFixAPIs() then
-    rejectAndUninject(executorKind .. ' lacks required HitFix debug APIs. Nothing was loaded.')
-    return nil
-end
-
 print('[AeroV4 Lite] Selected executor: ' .. executorKind)
 
 
@@ -218,7 +199,6 @@ local filterCode = [==[
             HitBoxes = true,
             ESP = true,
             BedPlates = true,
-            HitFix = true,
             FPSBoost = true,
             AutoTool = true
         }
@@ -371,11 +351,11 @@ customGUI = replaceOnce(customGUI,
     'legacy V4 logo overlay')
 customGUI = replaceOnce(customGUI,
     "logo.Size = UDim2.fromOffset(62, 18)",
-    "logo.Size = UDim2.fromOffset(94, 56)",
+    "logo.Size = UDim2.fromOffset(49, 30)",
     'main GUI logo dimensions')
 customGUI = replaceOnce(customGUI,
     "logo.Position = UDim2.fromOffset(11, 10)",
-    "logo.Position = UDim2.fromOffset(10, 2)",
+    "logo.Position = UDim2.fromOffset(10, 3)",
     'main GUI logo position')
 customGUI = replaceOnce(customGUI,
     "logo.ImageColor3 = select(3, uipallet.Main:ToHSV()) > 0.5 and uipallet.Text or Color3.new(1, 1, 1)",
@@ -402,122 +382,8 @@ writefile('aerov4/guis/new.lua', customGUI)
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
 
--- Match the single original HitFix registration block from the pinned BedWars version.
--- Select one API implementation at load-time (never run both).
-local function patchHitFix(bedwarsSource)
-    bedwarsSource = bedwarsSource:gsub('\r\n', '\n')
-    local oldStart = 'run(function()\n\tlocal Hitfix '
-    local oldNext = '\nrun(function()\n\tlocal Interface'
-    local first = bedwarsSource:find(oldStart, 1, true)
-    local following = first and bedwarsSource:find(oldNext, first, true)
-    if not first or not following then
-        error('[AeroV4 Lite] HitFix upstream registration changed; refusing to run unverified patch.')
-    end
-    local originalBlock = bedwarsSource:sub(first, following - 1)
-    if not originalBlock:find("Name = 'HitFix'", 1, true)
-        or not originalBlock:find('debug.getconstant', 1, true)
-        or not originalBlock:find('debug.setupvalue', 1, true) then
-        error('[AeroV4 Lite] Unexpected HitFix block. Refusing to load.')
-    end
-
-    local apiGetConstant, apiSetConstant, apiGetUpvalue, apiSetUpvalue
-    if executorKind == 'Potassium' then
-        apiGetConstant, apiSetConstant = 'debug.getconstant', 'debug.setconstant'
-        apiGetUpvalue, apiSetUpvalue = 'debug.getupvalue', 'debug.setupvalue'
-    elseif executorKind == 'Real' then
-        apiGetConstant, apiSetConstant = '(getconstant or debug.getconstant)', '(setconstant or debug.setconstant)'
-        apiGetUpvalue, apiSetUpvalue = '(getupvalue or debug.getupvalue)', '(setupvalue or debug.setupvalue)'
-    else
-        error('[AeroV4 Lite] Invalid HitFix executor adapter')
-    end
-
-    local code = [==[
-run(function()
-    local getConstant = __GET_CONSTANT__
-    local setConstant = __SET_CONSTANT__
-    local getUpvalue = __GET_UPVALUE__
-    local setUpvalue = __SET_UPVALUE__
-    local saved = setmetatable({}, {__mode = 'k'})
-    local HitFix
-
-    local function findState(func)
-        local state = saved[func]
-        if state then return state end
-        local index, originalConstant
-        for i = 1, 80 do
-            local ok, value = pcall(getConstant, func, i)
-            if not ok then break end
-            if value == 'Raycast' or value == 'raycast' then
-                index, originalConstant = i, value
-                break
-            end
-        end
-        if not index then
-            warn('[AeroV4 Lite HitFix] Raycast constant not found: module unchanged')
-            return nil
-        end
-        local ok, originalUpvalue = pcall(getUpvalue, func, 4)
-        if not ok then
-            warn('[AeroV4 Lite HitFix] Upvalue 4 not readable: module unchanged')
-            return nil
-        end
-        state = {
-            index = index,
-            originalConstant = originalConstant,
-            originalUpvalue = originalUpvalue
-        }
-        saved[func] = state
-        return state
-    end
-
-    HitFix = vape.Categories.Legit:CreateModule({
-        Name = 'HitFix',
-        Function = function(enabled)
-            local controller = bedwars.SwordController
-            local func = controller and controller.swingSwordAtMouse
-            if type(func) ~= 'function' then
-                warn('[AeroV4 Lite HitFix] Sword swing function unavailable')
-                return
-            end
-            local state = findState(func)
-            if not state then return end
-
-            local nextConstant = enabled and 'raycast' or state.originalConstant
-            local nextUpvalue = enabled and bedwars.QueryUtil or state.originalUpvalue
-            local constantOK, constantError = pcall(setConstant, func, state.index, nextConstant)
-            local upvalueOK, upvalueError = pcall(setUpvalue, func, 4, nextUpvalue)
-
-            if not constantOK or not upvalueOK then
-                warn('[AeroV4 Lite HitFix] Failed to apply ' .. tostring(enabled)
-                    .. ': ' .. tostring(constantError or upvalueError))
-                -- Avoid leaving only half the modification applied.
-                pcall(setConstant, func, state.index, state.originalConstant)
-                pcall(setUpvalue, func, 4, state.originalUpvalue)
-            end
-        end
-    })
-end)
-]==]
-    local substitutions = {
-        ['__GET_CONSTANT__'] = apiGetConstant,
-        ['__SET_CONSTANT__'] = apiSetConstant,
-        ['__GET_UPVALUE__'] = apiGetUpvalue,
-        ['__SET_UPVALUE__'] = apiSetUpvalue
-    }
-    for marker, value in pairs(substitutions) do
-        code = code:gsub(marker, function() return value end)
-    end
-    if code:find('__GET_') or code:find('__SET_') then
-        error('[AeroV4 Lite] Incomplete HitFix adaptation')
-    end
-    return bedwarsSource:sub(1, first - 1) .. code .. bedwarsSource:sub(following + 1)
-end
-
 local gameFileId = (game.PlaceId == 6872265039) and 6872265039 or 6872274481
 local bedwarsSource = getUpstream('games/' .. tostring(gameFileId) .. '.lua')
-if gameFileId == 6872274481 then
-    bedwarsSource = patchHitFix(bedwarsSource)
-end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
 local originalDownloader = getUpstream('downloader.lua')
