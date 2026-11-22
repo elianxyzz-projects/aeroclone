@@ -292,13 +292,7 @@ local filterCode = [==[
                 end
                 local experimental = self.Categories and self.Categories['Experimental (Ban)']
                 if experimental and experimental.Button then
-                    if experimental.Button.Object then
-                        local button = experimental.Button.Object
-                        button.Visible = true
-                        button.LayoutOrder = -1
-                        button.Text = '       Experimental (Ban)'
-                        button.TextSize = 13
-                    end
+                    if experimental.Button.Object then experimental.Button.Object.Visible = true end
                     if experimentalFirstLoad then
                         experimentalFirstLoad = false
                         if not experimental.Button.Enabled then experimental.Button:Toggle() end
@@ -327,40 +321,6 @@ local newMain = replaceOnce(
     filterCode .. '\n\tfinishLoading()\nelse\n\tvape.Init = finishLoading',
     'load-before-finish insertion point'
 )
-
--- Register the experimental category through the initialized GUI API.
-newMain = replaceOnce(newMain,
-    "shared.vape = vape\ntask.wait(0.1)",
-    [==[shared.vape = vape
-task.wait(0.1)
-
--- Register the category on the actual initialized GUI, before modules load.
-do
-    local name = 'Experimental (Ban)'
-    if not vape.Categories[name] then
-        local template = vape.Categories.Blatant
-        local icon = template and template.Button and template.Button.Icon
-        local experimental = vape:CreateCategory({
-            Name = name,
-            Icon = icon and icon.Image or '',
-            Size = UDim2.fromOffset(14, 14)
-        })
-        experimental.Object.Position = UDim2.fromOffset(466, 120)
-    end
-    local experimental = vape.Categories[name]
-    if experimental and experimental.Button and experimental.Button.Object then
-        local button = experimental.Button.Object
-        button.Visible = true
-        button.Text = '       Experimental (Ban)'
-        button.TextSize = 13
-        button.LayoutOrder = -1
-        experimental.Object.Title.TextSize = 11
-        print('[AeroV4 Lite] Experimental category registered.')
-    else
-        warn('[AeroV4 Lite] Experimental category registration failed.')
-    end
-end]==],
-    'runtime experimental category registration')
 
 -- Ensure teleport reloads return to this Lite build instead of full upstream.
 if SELF_URL then
@@ -441,6 +401,10 @@ customGUI = replaceOnce(customGUI,
     "scarcitybanner.Text = 'shitty ass aerov4 script gang gang'",
     "scarcitybanner.Text = ''",
     'bottom banner text')
+customGUI = replaceOnce(customGUI,
+    "mainapi.Categories.Main:CreateDivider('misc')",
+    "if game.GameId == 2619619496 then\n    mainapi:CreateCategory({\n        Name = 'Experimental (Ban)',\n        Icon = getcustomasset('aerov4/assets/new/blatanticon.png'),\n        Size = UDim2.fromOffset(14, 14)\n    })\n    local experimental = mainapi.Categories['Experimental (Ban)']\n    if experimental and experimental.Object then\n        experimental.Object.Position = UDim2.fromOffset(466, 120)\n        if experimental.Button and experimental.Button.Object then\n            experimental.Button.Object.Visible = true\n        end\n    end\nend\nmainapi.Categories.Main:CreateDivider('misc')",
+    'experimental category')
 writefile('aerov4/guis/new.lua', customGUI)
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
@@ -474,6 +438,8 @@ run(function()
     local HitFix, HitReg, Mode, Refresh, Notifications, Rate
     local active
     local hitTimes = {}
+    local rateHook
+    local sent, blocked = 0, 0
     local function allowHit()
         if not HitReg or not HitReg.Enabled then return true end
         local limit = math.clamp(math.floor(tonumber(Rate and Rate.Value) or 36), 0, 36)
@@ -482,7 +448,6 @@ run(function()
             table.remove(hitTimes, 1)
         end
         if #hitTimes >= limit then return false end
-        if hitTimes[#hitTimes] and now - hitTimes[#hitTimes] < 10 / limit then return false end
         hitTimes[#hitTimes + 1] = now
         return true
     end
@@ -496,6 +461,46 @@ run(function()
         if force or (Notifications and Notifications.Enabled) then
             pcall(function() vape:CreateNotification('HitReg Adjuster', message, 4) end)
         end
+    end
+
+    local function detachRateHook()
+        if not rateHook then return end
+        local state = rateHook
+        rateHook = nil
+        if state.controller.sendServerRequest == state.wrapper then
+            state.controller.sendServerRequest = state.original
+        end
+    end
+
+    local function attachRateHook()
+        local controller = bedwars.SwordController
+        if rateHook and rateHook.controller == controller
+            and controller.sendServerRequest == rateHook.wrapper then return true end
+        detachRateHook()
+        local original = controller and controller.sendServerRequest
+        if type(original) ~= 'function' then
+            report('Sword request method unavailable; rate cap not installed.', true)
+            return false
+        end
+        local state = {controller = controller, original = original}
+        state.wrapper = function(...)
+            if HitReg and HitReg.Enabled then
+                if not allowHit() then
+                    blocked += 1
+                    return
+                end
+                sent += 1
+            end
+            return original(...)
+        end
+        local ok, err = pcall(function() controller.sendServerRequest = state.wrapper end)
+        if not ok or controller.sendServerRequest ~= state.wrapper then
+            report('Rate cap could not attach: ' .. tostring(err), true)
+            return false
+        end
+        rateHook = state
+        print('[AeroLite HitReg] Rate cap attached to sword controller.')
+        return true
     end
 
     local function restore()
@@ -567,19 +572,38 @@ run(function()
 
     HitReg = vape.Categories['Experimental (Ban)']:CreateModule({
         Name = 'HitRegAdjuster',
-        Tooltip = 'Experimental. Caps outgoing sword-hit attempts per 10 seconds; does not change range or server validation. Third-party modifications risk a ban.',
+        Tooltip = 'Caps normal sword request attempts per 10 seconds. Does not change range, cooldown or server validation.',
+        ExtraText = function()
+            return tostring(sent) .. ' allowed / ' .. tostring(blocked) .. ' blocked'
+        end,
         Function = function(enabled)
-            reconcile(enabled)
             if enabled then
-                store.AeroLiteHitRegGate = allowHit
+                table.clear(hitTimes)
+                sent, blocked = 0, 0
+                attachRateHook()
                 HitReg:Clean(lplr.CharacterAdded:Connect(function()
                     task.delay(0.5, function()
-                        if HitReg.Enabled and Refresh and Refresh.Enabled then reconcile(false) end
+                        if HitReg.Enabled and Refresh and Refresh.Enabled then
+                            attachRateHook()
+                            pcall(reconcile, false)
+                        end
                     end)
                 end))
-            elseif store.AeroLiteHitRegGate == allowHit then
-                store.AeroLiteHitRegGate = nil
+                HitReg:Clean(task.spawn(function()
+                    while HitReg.Enabled do
+                        task.wait(10)
+                        if not HitReg.Enabled then break end
+                        if Notifications and Notifications.Enabled then
+                            report('Request calls: ' .. sent .. ' allowed, ' .. blocked .. ' blocked.')
+                        end
+                    end
+                end))
+            else
+                detachRateHook()
             end
+            -- A raycast compatibility failure must not prevent the request cap.
+            local ok, err = pcall(reconcile, enabled)
+            if not ok then report('Raycast mode unavailable: ' .. tostring(err), true) end
         end
     })
     Rate = HitReg:CreateSlider({
@@ -607,7 +631,7 @@ run(function()
         Default = false
     })
     vape:Clean(function()
-        if store.AeroLiteHitRegGate == allowHit then store.AeroLiteHitRegGate = nil end
+        detachRateHook()
         table.clear(hitTimes)
         restore()
     end)
@@ -624,14 +648,9 @@ if gameFileId == 6872274481 then
     bedwarsSource = capSlider(bedwarsSource, 'Mine = Reach:CreateSlider({', 16)
     bedwarsSource = capSlider(bedwarsSource, 'FOV = SilentAim:CreateSlider({', 100)
     bedwarsSource = addHitRegAdjuster(bedwarsSource)
-    bedwarsSource = replaceOnce(bedwarsSource,
-        "\t\t\t\t\treturn call:SendToServer(attackTable, ...)",
-        "\t\t\t\t\tif store.AeroLiteHitRegGate and not store.AeroLiteHitRegGate() then return end\n\t\t\t\t\treturn call:SendToServer(attackTable, ...)",
-        'sword hit attempt cap')
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
-print('[AeroV4 Lite] Build: experimental-category-runtime-v2')
 local originalDownloader = getUpstream('downloader.lua')
 local runDownloader, compileError = loadstring(originalDownloader, 'aerov4-lite-downloader')
 if not runDownloader then
