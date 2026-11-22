@@ -440,7 +440,13 @@ run(function()
     local hitTimes = {}
     local rateHook
     local savedDelays = {}
-    local sent, blocked = 0, 0
+    local sent, blocked, confirmed = 0, 0, 0
+    local session
+    local lastActivity = 0
+    local windowStart = 0
+    local totalSent, totalBlocked, totalConfirmed = 0, 0, 0
+    local confirmedTimes = {}
+    local peakConfirmed = 0
     local function rateValue()
         return math.clamp(math.floor(tonumber(Rate and Rate.Value) or 36), 0, 36)
     end
@@ -461,10 +467,53 @@ run(function()
     local setUpvalue = debug.setupvalue or setupvalue
 
     local function report(message, force)
-        if force then warn('[AeroLite HitReg] ' .. message) end
-        if force or (Notifications and Notifications.Enabled) then
-            pcall(function() vape:CreateNotification('HitReg Adjuster', message, 4) end)
+        if force then warn('[AeroLite HitReg] ' .. message)
+        else print('[AeroLite HitReg] ' .. message) end
+    end
+
+    local function sessionNotice(message)
+        if Notifications and Notifications.Enabled then
+            pcall(function() vape:CreateNotification('HitReg Adjuster', message, 5) end)
         end
+    end
+
+    local function resetSession()
+        session = nil
+        lastActivity, windowStart = 0, 0
+        sent, blocked, confirmed = 0, 0, 0
+        totalSent, totalBlocked, totalConfirmed = 0, 0, 0
+        peakConfirmed = 0
+        table.clear(confirmedTimes)
+    end
+
+    local function tickWindow(now)
+        if session and now - windowStart >= 10 then
+            windowStart += math.floor((now - windowStart) / 10) * 10
+            sent, blocked, confirmed = 0, 0, 0
+        end
+        while confirmedTimes[1] and now - confirmedTimes[1] >= 10 do
+            table.remove(confirmedTimes, 1)
+        end
+    end
+
+    local function finishSession()
+        if not session then return end
+        local duration = math.max(0, lastActivity - session)
+        sessionNotice(string.format(
+            'Stopped | %.1fs active | %d damage hits | %d sent, %d blocked | Peak 10s: %d hits',
+            duration, totalConfirmed, totalSent, totalBlocked, peakConfirmed))
+        resetSession()
+    end
+
+    local function noteActivity(now)
+        if session and now - lastActivity >= 5 then finishSession() end
+        if not session then
+            session = now
+            windowStart = now
+            sessionNotice('Clicking started | Target: ' .. rateValue() .. ' hits / 10s')
+        end
+        lastActivity = now
+        tickWindow(now)
     end
 
     local function restoreDelays()
@@ -496,9 +545,7 @@ run(function()
                 end
             end
         end
-        if Notifications and Notifications.Enabled then
-            report('Target: ' .. tostring(rateValue()) .. '/10s; timing entries changed: ' .. changed)
-        end
+        report('Target: ' .. tostring(rateValue()) .. '/10s; timing entries changed: ' .. changed)
         if changed == 0 then warn('[AeroLite HitReg] No eligible writable sword timing entries found.') end
     end
 
@@ -524,11 +571,14 @@ run(function()
         local state = {controller = controller, original = original}
         state.wrapper = function(...)
             if HitReg and HitReg.Enabled then
+                noteActivity(os.clock())
                 if not allowHit() then
                     blocked += 1
+                    totalBlocked += 1
                     return
                 end
                 sent += 1
+                totalSent += 1
             end
             return original(...)
         end
@@ -613,12 +663,30 @@ run(function()
         Name = 'HitRegAdjuster',
         Tooltip = 'Caps sword requests per 10 seconds; above 34 adjusts eligible local weapon timing. Does not change range or server validation.',
         ExtraText = function()
-            return tostring(sent) .. ' allowed / ' .. tostring(blocked) .. ' blocked'
+            return tostring(confirmed) .. ' hits / ' .. tostring(sent) .. ' sent / ' .. tostring(blocked) .. ' blocked'
         end,
         Function = function(enabled)
             if enabled then
                 table.clear(hitTimes)
-                sent, blocked = 0, 0
+                resetSession()
+                HitReg:Clean(inputService.InputBegan:Connect(function(input, processed)
+                    if not processed and input.UserInputType == Enum.UserInputType.MouseButton1 then
+                        noteActivity(os.clock())
+                    end
+                end))
+                HitReg:Clean(vapeEvents.EntityDamageEvent.Event:Connect(function(hit)
+                    if not session or type(hit) ~= 'table' then return end
+                    local from = hit.fromEntity
+                    if (from ~= lplr.Character and from ~= lplr) or not hit.entityInstance
+                        or hit.entityInstance == lplr.Character or hit.damageType ~= 0
+                        or (tonumber(hit.damage) or 0) <= 0 then return end
+                    local now = os.clock()
+                    tickWindow(now)
+                    confirmed += 1
+                    totalConfirmed += 1
+                    confirmedTimes[#confirmedTimes + 1] = now
+                    peakConfirmed = math.max(peakConfirmed, #confirmedTimes)
+                end))
                 attachRateHook()
                 updateDelays()
                 HitReg:Clean(lplr.CharacterAdded:Connect(function()
@@ -632,14 +700,20 @@ run(function()
                 end))
                 HitReg:Clean(task.spawn(function()
                     while HitReg.Enabled do
-                        task.wait(10)
+                        task.wait(0.1)
                         if not HitReg.Enabled then break end
-                        if Notifications and Notifications.Enabled then
-                            report('Request calls: ' .. sent .. ' allowed, ' .. blocked .. ' blocked.')
+                        if session then
+                            local now = os.clock()
+                            if now - lastActivity >= 5 then
+                                finishSession()
+                            else
+                                tickWindow(now)
+                            end
                         end
                     end
                 end))
             else
+                resetSession()
                 detachRateHook()
                 restoreDelays()
             end
@@ -673,9 +747,10 @@ run(function()
     })
     Notifications = HitReg:CreateToggle({
         Name = 'Notifications',
-        Default = false
+        Default = true
     })
     vape:Clean(function()
+        resetSession()
         detachRateHook()
         restoreDelays()
         table.clear(hitTimes)
