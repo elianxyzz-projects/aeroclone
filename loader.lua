@@ -195,7 +195,6 @@ local filterCode = [==[
             SilentAim = true,
             Reach = true,
             HitFix = true,
-            HitRegAdjuster = true,
             KitESP = true,
             KitRender = true,
             NameTags = true,
@@ -423,201 +422,27 @@ local function capSlider(source, marker, cap)
     return head .. changed
 end
 
--- Replace the original HitFix block with a shared raycast controller.
--- The original HitFix toggle remains, while the new module exposes its mode.
-local function addHitRegAdjuster(source)
+-- Retain the existing standalone HitFix compatibility and restore logic.
+local function patchHitFix(source)
     local startMarker = "run(function()\n\tlocal Hitfix "
     local endMarker = "\nrun(function()\n\tlocal Interface"
     local first = source:find(startMarker, 1, true)
     local last = first and source:find(endMarker, first, true)
     if not first or not last or not source:sub(first, last - 1):find("Name = 'HitFix'", 1, true) then
-        error('[AeroV4 Lite] HitFix block changed; cannot add HitRegAdjuster.')
+        error('[AeroV4 Lite] HitFix block changed; cannot apply HitFix compatibility patch.')
     end
     local replacement = [==[
 run(function()
-    local HitFix, HitReg, Mode, Refresh, Notifications, Rate
+    local HitFix
     local active
-    local hitTimes = {}
-    local rateHook
-    local savedDelays = {}
-    local sent, blocked, confirmed = 0, 0, 0
-    local session
-    local lastActivity = 0
-    local windowStart = 0
-    local totalSent, totalBlocked, totalConfirmed = 0, 0, 0
-    local confirmedTimes = {}
-    local peakConfirmed = 0
-    local gapStats = {}
-    local function recordGap(kind, now)
-        local stat = gapStats[kind]
-        if not stat then
-            stat = {last = now, max = 0, pauses = 0}
-            gapStats[kind] = stat
-            return
-        end
-        local gap = now - stat.last
-        stat.last = now
-        stat.max = math.max(stat.max, gap)
-        if gap > 0.45 then stat.pauses += 1 end
-    end
-    local function gapSummary(kind)
-        local stat = gapStats[kind]
-        return stat and string.format('%dms (%d pauses)', math.floor(stat.max * 1000 + 0.5), stat.pauses) or 'n/a'
-    end
-    local function rateValue()
-        return math.clamp(math.floor(tonumber(Rate and Rate.Value) or 36), 0, 36)
-    end
-    local function allowHit()
-        if not HitReg or not HitReg.Enabled then return true end
-        local limit = rateValue()
-        local now = os.clock()
-        while hitTimes[1] and now - hitTimes[1] >= 10 do
-            table.remove(hitTimes, 1)
-        end
-        if #hitTimes >= limit then return false end
-        hitTimes[#hitTimes + 1] = now
-        return true
-    end
     local getConstant = debug.getconstant or getconstant
     local setConstant = debug.setconstant or setconstant
     local getUpvalue = debug.getupvalue or getupvalue
     local setUpvalue = debug.setupvalue or setupvalue
 
     local function report(message, force)
-        if force then warn('[AeroLite HitReg] ' .. message)
-        else print('[AeroLite HitReg] ' .. message) end
-    end
-
-    local function sessionNotice(message)
-        if Notifications and Notifications.Enabled then
-            pcall(function() vape:CreateNotification('HitReg Adjuster', message, 5) end)
-        end
-    end
-
-    local function resetSession()
-        session = nil
-        lastActivity, windowStart = 0, 0
-        sent, blocked, confirmed = 0, 0, 0
-        totalSent, totalBlocked, totalConfirmed = 0, 0, 0
-        peakConfirmed = 0
-        table.clear(gapStats)
-        table.clear(confirmedTimes)
-    end
-
-    local function tickWindow(now)
-        if session and now - windowStart >= 10 then
-            windowStart += math.floor((now - windowStart) / 10) * 10
-            sent, blocked, confirmed = 0, 0, 0
-        end
-        while confirmedTimes[1] and now - confirmedTimes[1] >= 10 do
-            table.remove(confirmedTimes, 1)
-        end
-    end
-
-    local function finishSession()
-        if not session then return end
-        local duration = math.max(0, lastActivity - session)
-        sessionNotice(string.format(
-            'Stopped | %.1fs active | %d damage hits | %d sent, %d blocked | Peak 10s: %d hits',
-            duration, totalConfirmed, totalSent, totalBlocked, peakConfirmed))
-        local gaps = 'Longest gaps: input ' .. gapSummary('input')
-            .. ', attempts ' .. gapSummary('attempt')
-            .. ', sent ' .. gapSummary('sent')
-            .. ', damage ' .. gapSummary('damage')
-        print('[AeroLite HitReg] ' .. gaps)
-        print(string.format('[AeroLite HitReg] Session totals: %d sent, %d blocked, %d damage hits.',
-            totalSent, totalBlocked, totalConfirmed))
-        resetSession()
-    end
-
-    local function noteActivity(now)
-        if session and now - lastActivity >= 5 then finishSession() end
-        if not session then
-            session = now
-            windowStart = now
-            sessionNotice('Clicking started | Target: ' .. rateValue() .. ' hits / 10s')
-        end
-        lastActivity = now
-        tickWindow(now)
-    end
-
-    local function restoreDelays()
-        for sword, state in pairs(savedDelays) do
-            pcall(function()
-                if sword.attackSpeed == state.applied then sword.attackSpeed = state.original end
-            end)
-        end
-        table.clear(savedDelays)
-    end
-
-    local function updateDelays()
-        restoreDelays()
-        if not HitReg or not HitReg.Enabled or rateValue() <= 34 then return end
-        local targetInterval = 10 / rateValue()
-        local itemMeta = bedwars.ItemMeta
-        if type(itemMeta) ~= 'table' then report('Weapon timing metadata unavailable.', true) return end
-        local changed = 0
-        for _, meta in pairs(itemMeta) do
-            local sword = type(meta) == 'table' and meta.sword
-            if type(sword) == 'table' and not savedDelays[sword] then
-                local original = sword.attackSpeed
-                if type(original) == 'number' and original > targetInterval and original <= 0.35 then
-                    local ok = pcall(function() sword.attackSpeed = targetInterval end)
-                    if ok and sword.attackSpeed == targetInterval then
-                        savedDelays[sword] = {original = original, applied = targetInterval}
-                        changed += 1
-                    end
-                end
-            end
-        end
-        report('Target: ' .. tostring(rateValue()) .. '/10s; timing entries changed: ' .. changed)
-        if changed == 0 then warn('[AeroLite HitReg] No eligible writable sword timing entries found.') end
-    end
-
-    local function detachRateHook()
-        if not rateHook then return end
-        local state = rateHook
-        rateHook = nil
-        if state.controller.sendServerRequest == state.wrapper then
-            state.controller.sendServerRequest = state.original
-        end
-    end
-
-    local function attachRateHook()
-        local controller = bedwars.SwordController
-        if rateHook and rateHook.controller == controller
-            and controller.sendServerRequest == rateHook.wrapper then return true end
-        detachRateHook()
-        local original = controller and controller.sendServerRequest
-        if type(original) ~= 'function' then
-            report('Sword request method unavailable; rate cap not installed.', true)
-            return false
-        end
-        local state = {controller = controller, original = original}
-        state.wrapper = function(...)
-            if HitReg and HitReg.Enabled then
-                local now = os.clock()
-                noteActivity(now)
-                recordGap('attempt', now)
-                if not allowHit() then
-                    blocked += 1
-                    totalBlocked += 1
-                    return
-                end
-                sent += 1
-                totalSent += 1
-                recordGap('sent', now)
-            end
-            return original(...)
-        end
-        local ok, err = pcall(function() controller.sendServerRequest = state.wrapper end)
-        if not ok or controller.sendServerRequest ~= state.wrapper then
-            report('Rate cap could not attach: ' .. tostring(err), true)
-            return false
-        end
-        rateHook = state
-        print('[AeroLite HitReg] Rate cap attached to sword controller.')
-        return true
+        if force then warn('[AeroLite HitFix] ' .. message)
+        else print('[AeroLite HitFix] ' .. message) end
     end
 
     local function restore()
@@ -629,9 +454,8 @@ run(function()
         return a and b
     end
 
-    local function reconcile(notify)
-        local adjuster = HitReg and HitReg.Enabled
-        local enabled = adjuster or (HitFix and HitFix.Enabled)
+    local function reconcile()
+        local enabled = HitFix and HitFix.Enabled
         if not enabled then
             if not restore() then report('Could not restore original raycast.', true) end
             return
@@ -644,9 +468,8 @@ run(function()
         local controller = bedwars.SwordController
         local func = controller and controller.swingSwordAtMouse
         if type(func) ~= 'function' then return end
-        local useQuery = not adjuster or not Mode or Mode.Value == 'Game Query'
-        local target = useQuery and bedwars.QueryUtil or workspace
-        local constant = useQuery and 'raycast' or 'Raycast'
+        local target = bedwars.QueryUtil
+        local constant = 'raycast'
         if not target then report('Selected query unavailable.', true) return end
         if active and active.func ~= func and not restore() then
             report('Could not restore previous controller.', true)
@@ -678,115 +501,15 @@ run(function()
             report('Could not apply selected mode.', true)
             return
         end
-        if notify and adjuster then report(useQuery and 'Game Query active.' or 'Workspace raycast active.') end
     end
 
     HitFix = vape.Categories.Legit:CreateModule({
         Name = 'HitFix',
-        Function = function() reconcile(false) end,
-        Tooltip = 'Original AeroV4 query behavior. HitReg Adjuster takes priority when enabled.'
+        Function = function() reconcile() end,
+        Tooltip = 'Original AeroV4 query behavior.'
     })
 
-    HitReg = vape.Categories['Experimental (Ban)']:CreateModule({
-        Name = 'HitRegAdjuster',
-        Tooltip = 'Caps sword requests per 10 seconds; above 34 adjusts eligible local weapon timing. Does not change range or server validation.',
-        ExtraText = function()
-            return tostring(confirmed) .. ' hits / ' .. tostring(sent) .. ' sent / ' .. tostring(blocked) .. ' blocked'
-        end,
-        Function = function(enabled)
-            if enabled then
-                table.clear(hitTimes)
-                resetSession()
-                HitReg:Clean(inputService.InputBegan:Connect(function(input, processed)
-                    if not processed and input.UserInputType == Enum.UserInputType.MouseButton1 then
-                        local now = os.clock()
-                        noteActivity(now)
-                        recordGap('input', now)
-                    end
-                end))
-                HitReg:Clean(vapeEvents.EntityDamageEvent.Event:Connect(function(hit)
-                    if not session or type(hit) ~= 'table' then return end
-                    local from = hit.fromEntity
-                    if (from ~= lplr.Character and from ~= lplr) or not hit.entityInstance
-                        or hit.entityInstance == lplr.Character or hit.damageType ~= 0
-                        or (tonumber(hit.damage) or 0) <= 0 then return end
-                    local now = os.clock()
-                    tickWindow(now)
-                    recordGap('damage', now)
-                    confirmed += 1
-                    totalConfirmed += 1
-                    confirmedTimes[#confirmedTimes + 1] = now
-                    peakConfirmed = math.max(peakConfirmed, #confirmedTimes)
-                end))
-                attachRateHook()
-                updateDelays()
-                HitReg:Clean(lplr.CharacterAdded:Connect(function()
-                    task.delay(0.5, function()
-                        if HitReg.Enabled and Refresh and Refresh.Enabled then
-                            attachRateHook()
-                            updateDelays()
-                            pcall(reconcile, false)
-                        end
-                    end)
-                end))
-                HitReg:Clean(task.spawn(function()
-                    while HitReg.Enabled do
-                        task.wait(0.1)
-                        if not HitReg.Enabled then break end
-                        if session then
-                            local now = os.clock()
-                            if now - lastActivity >= 5 then
-                                finishSession()
-                            else
-                                tickWindow(now)
-                            end
-                        end
-                    end
-                end))
-            else
-                resetSession()
-                detachRateHook()
-                restoreDelays()
-            end
-            -- A raycast compatibility failure must not prevent the request cap.
-            local ok, err = pcall(reconcile, enabled)
-            if not ok then report('Raycast mode unavailable: ' .. tostring(err), true) end
-        end
-    })
-    Rate = HitReg:CreateSlider({
-        Name = 'Hits per 10 seconds',
-        Min = 0,
-        Max = 36,
-        Default = 36,
-        AeroLiteCap = true,
-        Decimal = 1,
-        Function = function()
-            if HitReg and HitReg.Enabled then updateDelays() end
-        end
-    })
-    Mode = HitReg:CreateDropdown({
-        Name = 'Mode',
-        List = {'Game Query', 'Workspace'},
-        Default = 'Game Query',
-        Function = function()
-            if HitReg.Enabled then reconcile(true) end
-        end
-    })
-    Refresh = HitReg:CreateToggle({
-        Name = 'Refresh on Respawn',
-        Default = true
-    })
-    Notifications = HitReg:CreateToggle({
-        Name = 'Notifications',
-        Default = true
-    })
-    vape:Clean(function()
-        resetSession()
-        detachRateHook()
-        restoreDelays()
-        table.clear(hitTimes)
-        restore()
-    end)
+    vape:Clean(function() restore() end)
 end)
 ]==]
     return source:sub(1, first - 1) .. replacement .. source:sub(last)
@@ -799,7 +522,7 @@ if gameFileId == 6872274481 then
     bedwarsSource = capSlider(bedwarsSource, 'Attack = Reach:CreateSlider({', 16)
     bedwarsSource = capSlider(bedwarsSource, 'Mine = Reach:CreateSlider({', 16)
     bedwarsSource = capSlider(bedwarsSource, 'FOV = SilentAim:CreateSlider({', 100)
-    bedwarsSource = addHitRegAdjuster(bedwarsSource)
+    bedwarsSource = patchHitFix(bedwarsSource)
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
