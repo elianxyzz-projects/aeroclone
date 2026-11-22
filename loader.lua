@@ -192,7 +192,9 @@ local filterCode = [==[
     do
         local keep = {
             AimAssist = true,
-            ProjectileAimbot = true,
+            SilentAim = true,
+            Reach = true,
+            HitFix = true,
             KitESP = true,
             KitRender = true,
             NameTags = true,
@@ -378,12 +380,37 @@ customGUI = replaceOnce(customGUI,
     "settingschildren.BackgroundColor3 = uipallet.Main",
     "settingschildren.BackgroundColor3 = Color3.fromRGB(5, 57, 144)\n\tlocal childrenGradient = Instance.new('UIGradient')\n\tchildrenGradient.Rotation = 90\n\tchildrenGradient.Color = ColorSequence.new(Color3.fromRGB(6, 69, 178), Color3.fromRGB(2, 150, 216))\n\tchildrenGradient.Parent = settingschildren",
     'Settings content background')
+-- Enforce capped sliders for typed values and restored profiles as well.
+customGUI = replaceOnce(customGUI,
+    "function optionapi:SetValue(value, pos, final)\n\t\t\tif tonumber(value) == math.huge or value ~= value then return end",
+    "function optionapi:SetValue(value, pos, final)\n\t\t\tif tonumber(value) == math.huge or value ~= value then return end\n\t\t\tif optionsettings.AeroLiteCap then value = math.clamp(tonumber(value) or optionsettings.Min, optionsettings.Min, optionsettings.Max) end",
+    'capped slider value validation')
 writefile('aerov4/guis/new.lua', customGUI)
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
 
+-- Limit only the original BedWars module sliders, preserving their other options.
+local function capSlider(source, marker, cap)
+    local first, last = source:find(marker, 1, true)
+    if not first or source:find(marker, last + 1, true) then
+        error('[AeroV4 Lite] Unexpected slider registration: ' .. marker)
+    end
+    local head, tail = source:sub(1, last), source:sub(last + 1)
+    local changed, count = tail:gsub('^(%s*Name%s*=%s*[^,\n]+,%s*.-Min%s*=%s*%d+,%s*)Max%s*=%s*%d+,(%s*)Default%s*=%s*%d+,', function(prefix, spacing)
+        return prefix .. 'Max = ' .. cap .. ',' .. spacing .. 'Default = ' .. cap .. ', AeroLiteCap = true,'
+    end, 1)
+    if count ~= 1 then error('[AeroV4 Lite] Slider layout changed: ' .. marker) end
+    return head .. changed
+end
+
 local gameFileId = (game.PlaceId == 6872265039) and 6872265039 or 6872274481
 local bedwarsSource = getUpstream('games/' .. tostring(gameFileId) .. '.lua')
+if gameFileId == 6872274481 then
+    bedwarsSource = bedwarsSource:gsub('\r\n', '\n')
+    bedwarsSource = capSlider(bedwarsSource, 'Attack = Reach:CreateSlider({', 16)
+    bedwarsSource = capSlider(bedwarsSource, 'Mine = Reach:CreateSlider({', 16)
+    bedwarsSource = capSlider(bedwarsSource, 'FOV = SilentAim:CreateSlider({', 100)
+end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
 local originalDownloader = getUpstream('downloader.lua')
