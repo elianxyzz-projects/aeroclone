@@ -275,6 +275,7 @@ local filterCode = [==[
         end
 
         -- Previous full-client profiles must not reveal hidden categories.
+        local experimentalFirstLoad = true
         local upstreamLoad = vape.Load
         if type(upstreamLoad) == 'function' then
             function vape:Load(...)
@@ -287,6 +288,15 @@ local filterCode = [==[
                         if category.Button and category.Button.Object then
                             category.Button.Object.Visible = false
                         end
+                    end
+                end
+                local experimental = self.Categories and self.Categories['Experimental (Ban)']
+                if experimental and experimental.Button then
+                    if experimental.Button.Object then experimental.Button.Object.Visible = true end
+                    if experimentalFirstLoad then
+                        experimentalFirstLoad = false
+                        if not experimental.Button.Enabled then experimental.Button:Toggle() end
+                        if not experimental.Expanded and experimental.Expand then experimental:Expand() end
                     end
                 end
                 return table.unpack(result, 1, result.n)
@@ -393,7 +403,7 @@ customGUI = replaceOnce(customGUI,
     'bottom banner text')
 customGUI = replaceOnce(customGUI,
     "mainapi.Categories.Main:CreateDivider('misc')",
-    "if game.GameId == 2619619496 and game.PlaceId ~= 6872265039 then\n    mainapi:CreateCategory({\n        Name = 'Experimental (Ban)',\n        Icon = getcustomasset('aerov4/assets/new/blatanticon.png'),\n        Size = UDim2.fromOffset(14, 14)\n    })\n    local experimental = mainapi.Categories['Experimental (Ban)']\n    if experimental and experimental.Object then\n        experimental.Object.Position = UDim2.fromOffset(466, 120)\n    end\nend\nmainapi.Categories.Main:CreateDivider('misc')",
+    "if game.GameId == 2619619496 then\n    mainapi:CreateCategory({\n        Name = 'Experimental (Ban)',\n        Icon = getcustomasset('aerov4/assets/new/blatanticon.png'),\n        Size = UDim2.fromOffset(14, 14)\n    })\n    local experimental = mainapi.Categories['Experimental (Ban)']\n    if experimental and experimental.Object then\n        experimental.Object.Position = UDim2.fromOffset(466, 120)\n        if experimental.Button and experimental.Button.Object then\n            experimental.Button.Object.Visible = true\n        end\n    end\nend\nmainapi.Categories.Main:CreateDivider('misc')",
     'experimental category')
 writefile('aerov4/guis/new.lua', customGUI)
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
