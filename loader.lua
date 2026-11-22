@@ -439,10 +439,14 @@ run(function()
     local active
     local hitTimes = {}
     local rateHook
+    local savedDelays = {}
     local sent, blocked = 0, 0
+    local function rateValue()
+        return math.clamp(math.floor(tonumber(Rate and Rate.Value) or 36), 0, 36)
+    end
     local function allowHit()
         if not HitReg or not HitReg.Enabled then return true end
-        local limit = math.clamp(math.floor(tonumber(Rate and Rate.Value) or 36), 0, 36)
+        local limit = rateValue()
         local now = os.clock()
         while hitTimes[1] and now - hitTimes[1] >= 10 do
             table.remove(hitTimes, 1)
@@ -461,6 +465,41 @@ run(function()
         if force or (Notifications and Notifications.Enabled) then
             pcall(function() vape:CreateNotification('HitReg Adjuster', message, 4) end)
         end
+    end
+
+    local function restoreDelays()
+        for sword, state in pairs(savedDelays) do
+            pcall(function()
+                if sword.attackSpeed == state.applied then sword.attackSpeed = state.original end
+            end)
+        end
+        table.clear(savedDelays)
+    end
+
+    local function updateDelays()
+        restoreDelays()
+        if not HitReg or not HitReg.Enabled or rateValue() <= 34 then return end
+        local targetInterval = 10 / rateValue()
+        local itemMeta = bedwars.ItemMeta
+        if type(itemMeta) ~= 'table' then report('Weapon timing metadata unavailable.', true) return end
+        local changed = 0
+        for _, meta in pairs(itemMeta) do
+            local sword = type(meta) == 'table' and meta.sword
+            if type(sword) == 'table' and not savedDelays[sword] then
+                local original = sword.attackSpeed
+                if type(original) == 'number' and original > targetInterval and original <= 0.35 then
+                    local ok = pcall(function() sword.attackSpeed = targetInterval end)
+                    if ok and sword.attackSpeed == targetInterval then
+                        savedDelays[sword] = {original = original, applied = targetInterval}
+                        changed += 1
+                    end
+                end
+            end
+        end
+        if Notifications and Notifications.Enabled then
+            report('Target: ' .. tostring(rateValue()) .. '/10s; timing entries changed: ' .. changed)
+        end
+        if changed == 0 then warn('[AeroLite HitReg] No eligible writable sword timing entries found.') end
     end
 
     local function detachRateHook()
@@ -572,7 +611,7 @@ run(function()
 
     HitReg = vape.Categories['Experimental (Ban)']:CreateModule({
         Name = 'HitRegAdjuster',
-        Tooltip = 'Caps normal sword request attempts per 10 seconds. Does not change range, cooldown or server validation.',
+        Tooltip = 'Caps sword requests per 10 seconds; above 34 adjusts eligible local weapon timing. Does not change range or server validation.',
         ExtraText = function()
             return tostring(sent) .. ' allowed / ' .. tostring(blocked) .. ' blocked'
         end,
@@ -581,10 +620,12 @@ run(function()
                 table.clear(hitTimes)
                 sent, blocked = 0, 0
                 attachRateHook()
+                updateDelays()
                 HitReg:Clean(lplr.CharacterAdded:Connect(function()
                     task.delay(0.5, function()
                         if HitReg.Enabled and Refresh and Refresh.Enabled then
                             attachRateHook()
+                            updateDelays()
                             pcall(reconcile, false)
                         end
                     end)
@@ -600,6 +641,7 @@ run(function()
                 end))
             else
                 detachRateHook()
+                restoreDelays()
             end
             -- A raycast compatibility failure must not prevent the request cap.
             local ok, err = pcall(reconcile, enabled)
@@ -612,7 +654,10 @@ run(function()
         Max = 36,
         Default = 36,
         AeroLiteCap = true,
-        Decimal = 1
+        Decimal = 1,
+        Function = function()
+            if HitReg and HitReg.Enabled then updateDelays() end
+        end
     })
     Mode = HitReg:CreateDropdown({
         Name = 'Mode',
@@ -632,6 +677,7 @@ run(function()
     })
     vape:Clean(function()
         detachRateHook()
+        restoreDelays()
         table.clear(hitTimes)
         restore()
     end)
