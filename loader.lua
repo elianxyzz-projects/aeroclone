@@ -385,6 +385,10 @@ customGUI = replaceOnce(customGUI,
     "function optionapi:SetValue(value, pos, final)\n\t\t\tif tonumber(value) == math.huge or value ~= value then return end",
     "function optionapi:SetValue(value, pos, final)\n\t\t\tif tonumber(value) == math.huge or value ~= value then return end\n\t\t\tif optionsettings.AeroLiteCap then value = math.clamp(tonumber(value) or optionsettings.Min, optionsettings.Min, optionsettings.Max) end",
     'capped slider value validation')
+customGUI = replaceOnce(customGUI,
+    "scarcitybanner.Text = 'shitty ass aerov4 script gang gang'",
+    "scarcitybanner.Text = ''",
+    'bottom banner text')
 writefile('aerov4/guis/new.lua', customGUI)
 writefile('aerov4/games/universal.lua', getUpstream('games/universal.lua'))
 
