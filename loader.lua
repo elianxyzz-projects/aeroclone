@@ -195,6 +195,7 @@ local filterCode = [==[
             SilentAim = true,
             Reach = true,
             HitFix = true,
+            HitRegAdjuster = true,
             KitESP = true,
             KitRender = true,
             NameTags = true,
@@ -407,6 +408,135 @@ local function capSlider(source, marker, cap)
     return head .. changed
 end
 
+-- Replace the original HitFix block with a shared raycast controller.
+-- The original HitFix toggle remains, while the new module exposes its mode.
+local function addHitRegAdjuster(source)
+    local startMarker = "run(function()\n\tlocal Hitfix "
+    local endMarker = "\nrun(function()\n\tlocal Interface"
+    local first = source:find(startMarker, 1, true)
+    local last = first and source:find(endMarker, first, true)
+    if not first or not last or not source:sub(first, last - 1):find("Name = 'HitFix'", 1, true) then
+        error('[AeroV4 Lite] HitFix block changed; cannot add HitRegAdjuster.')
+    end
+    local replacement = [==[
+run(function()
+    local HitFix, HitReg, Mode, Refresh, Notifications
+    local active
+    local getConstant = debug.getconstant or getconstant
+    local setConstant = debug.setconstant or setconstant
+    local getUpvalue = debug.getupvalue or getupvalue
+    local setUpvalue = debug.setupvalue or setupvalue
+
+    local function report(message, force)
+        if force then warn('[AeroLite HitReg] ' .. message) end
+        if force or (Notifications and Notifications.Enabled) then
+            pcall(function() vape:CreateNotification('HitReg Adjuster', message, 4) end)
+        end
+    end
+
+    local function restore()
+        if not active then return true end
+        local old = active
+        local a = pcall(setConstant, old.func, old.index, old.constant)
+        local b = pcall(setUpvalue, old.func, 4, old.value)
+        if a and b then active = nil end
+        return a and b
+    end
+
+    local function reconcile(notify)
+        local adjuster = HitReg and HitReg.Enabled
+        local enabled = adjuster or (HitFix and HitFix.Enabled)
+        if not enabled then
+            if not restore() then report('Could not restore original raycast.', true) end
+            return
+        end
+        if type(getConstant) ~= 'function' or type(setConstant) ~= 'function'
+            or type(getUpvalue) ~= 'function' or type(setUpvalue) ~= 'function' then
+            report('Required executor APIs unavailable.', true)
+            return
+        end
+        local controller = bedwars.SwordController
+        local func = controller and controller.swingSwordAtMouse
+        if type(func) ~= 'function' then return end
+        local useQuery = not adjuster or not Mode or Mode.Value == 'Game Query'
+        local target = useQuery and bedwars.QueryUtil or workspace
+        local constant = useQuery and 'raycast' or 'Raycast'
+        if not target then report('Selected query unavailable.', true) return end
+        if active and active.func ~= func and not restore() then
+            report('Could not restore previous controller.', true)
+            return
+        end
+        if not active then
+            local index, original
+            for n = 1, 50 do
+                local ok, val = pcall(getConstant, func, n)
+                if not ok then break end
+                if val == 'Raycast' or val == 'raycast' then
+                    index, original = n, val
+                    break
+                end
+            end
+            if not index then report('Raycast not found; controller unchanged.', true) return end
+            local ok, first, second = pcall(getUpvalue, func, 4)
+            local value = second ~= nil and second or first
+            if not ok or (value ~= workspace and value ~= bedwars.QueryUtil) then
+                report('Unexpected query object; controller unchanged.', true)
+                return
+            end
+            active = {func = func, index = index, constant = original, value = value}
+        end
+        local a = pcall(setConstant, func, active.index, constant)
+        local b = a and pcall(setUpvalue, func, 4, target)
+        if not a or not b then
+            restore()
+            report('Could not apply selected mode.', true)
+            return
+        end
+        if notify and adjuster then report(useQuery and 'Game Query active.' or 'Workspace raycast active.') end
+    end
+
+    HitFix = vape.Categories.Legit:CreateModule({
+        Name = 'HitFix',
+        Function = function() reconcile(false) end,
+        Tooltip = 'Original AeroV4 query behavior. HitReg Adjuster takes priority when enabled.'
+    })
+
+    HitReg = vape.Categories.Legit:CreateModule({
+        Name = 'HitRegAdjuster',
+        Tooltip = 'Choose a client-side sword detection mode. Does not change server validation.',
+        Function = function(enabled)
+            reconcile(enabled)
+            if enabled then
+                HitReg:Clean(lplr.CharacterAdded:Connect(function()
+                    task.delay(0.5, function()
+                        if HitReg.Enabled and Refresh and Refresh.Enabled then reconcile(false) end
+                    end)
+                end))
+            end
+        end
+    })
+    Mode = HitReg:CreateDropdown({
+        Name = 'Mode',
+        List = {'Game Query', 'Workspace'},
+        Default = 'Game Query',
+        Function = function()
+            if HitReg.Enabled then reconcile(true) end
+        end
+    })
+    Refresh = HitReg:CreateToggle({
+        Name = 'Refresh on Respawn',
+        Default = true
+    })
+    Notifications = HitReg:CreateToggle({
+        Name = 'Notifications',
+        Default = false
+    })
+    vape:Clean(function() restore() end)
+end)
+]==]
+    return source:sub(1, first - 1) .. replacement .. source:sub(last)
+end
+
 local gameFileId = (game.PlaceId == 6872265039) and 6872265039 or 6872274481
 local bedwarsSource = getUpstream('games/' .. tostring(gameFileId) .. '.lua')
 if gameFileId == 6872274481 then
@@ -414,6 +544,7 @@ if gameFileId == 6872274481 then
     bedwarsSource = capSlider(bedwarsSource, 'Attack = Reach:CreateSlider({', 16)
     bedwarsSource = capSlider(bedwarsSource, 'Mine = Reach:CreateSlider({', 16)
     bedwarsSource = capSlider(bedwarsSource, 'FOV = SilentAim:CreateSlider({', 100)
+    bedwarsSource = addHitRegAdjuster(bedwarsSource)
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
