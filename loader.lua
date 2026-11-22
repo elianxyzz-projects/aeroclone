@@ -3,6 +3,8 @@
 -- Upstream: https://github.com/wrealaero/aerov4
 
 repeat task.wait() until game:IsLoaded()
+-- Wait 10 seconds after the game has finished loading before initializing Aero.
+task.wait(10)
 
 -- Verify executor identity before downloading, running modules, or modifying any files.
 -- Only exact name prefixes are allowed; names are case-insensitive.
