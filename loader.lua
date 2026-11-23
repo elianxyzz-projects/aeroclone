@@ -786,7 +786,7 @@ if gameFileId == 6872274481 then
         return EntityLimitSlider and EntityLimitSlider.Value or 3
     end
     local FRONT_DISTANCE = 20
-    local CURSOR_RADIUS_PIXELS = 60
+    local CURSOR_RADIUS_PIXELS = 45
     local TreeCheck, HephCheck
 
     local function matchesCheckedKit(model)
