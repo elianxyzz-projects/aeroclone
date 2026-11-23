@@ -414,8 +414,7 @@ local filterCode = [==[
                     local distanceMode = normalize(mode):find('distance', 1, true) ~= nil
 
                     local ban = (h ~= nil and h > 25 and r ~= nil and r > 13.5 and ping ~= nil and ping < 120)
-                        or (r ~= nil and r >= 16)
-                        or (r ~= nil and r > 15 and ping ~= nil and ping > 200)
+                        or (r ~= nil and r > 15)
                         or (airPct ~= nil and airPct > 85)
                         or (fov ~= nil and (fov > 85 or (fov > 40 and not distanceMode)))
 
