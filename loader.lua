@@ -439,7 +439,7 @@ local filterCode = [==[
                     end
                     return ban, render, table.concat({
                         tostring(reach and reach.Enabled), tostring(r), tostring(hitboxes and hitboxes.Enabled),
-                        tostring(h), tostring(math.floor((ping or -1) / 5)), tostring(airPct),
+                        tostring(h), tostring(ping ~= nil and ping < 130), tostring(ping ~= nil and ping > 200), tostring(airPct),
                         tostring(silent and silent.Enabled), tostring(fov), mode, tostring(render)
                     }, '|')
                 end
