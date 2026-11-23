@@ -136,7 +136,7 @@ end
 -- Pinning this known upstream snapshot prevents unexpected upstream changes.
 local UPSTREAM_COMMIT = 'b723802d331778a362bfbd475fc2fb6f831c3fc1'
 local UPSTREAM_BASE = 'https://raw.githubusercontent.com/wrealaero/aerov4/' .. UPSTREAM_COMMIT .. '/'
-local DEFAULT_SELF_URL = 'https://raw.githubusercontent.com/elianxyzz-projects/aeroclone/main/loader.lua'
+local DEFAULT_SELF_URL = 'https://raw.githubusercontent.com/elianxyzz-projects/elianware/main/loader.lua'
 local env = getgenv()
 local SELF_URL = env.AeroV4LiteURL or DEFAULT_SELF_URL
 
