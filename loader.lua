@@ -851,6 +851,28 @@ if gameFileId == 6872274481 then
     phaseReplace("\t\t\telse\n\t\t\t\tfor _, conn in ipairs(connections) do",
         "\t\t\telse\n                pauseGeneration = pauseGeneration + 1\n                setPaused(false)\n\t\t\t\tfor _, conn in ipairs(connections) do",
         'stop monitor and restore on disable')
+    -- Camera-centered detection works with third-person aiming; distance is user-adjustable.
+    phaseReplace("local FRONT_DISTANCE = 20",
+        "local FrontDistanceSlider",
+        'corridor distance slider declaration')
+    phaseReplace("local origin = root.Position",
+        "local origin = camera.CFrame.Position",
+        'camera based corridor origin')
+    phaseReplace("along > FRONT_DISTANCE",
+        "along > (FrontDistanceSlider and FrontDistanceSlider.Value or 20)",
+        'live adjustable corridor distance')
+    phaseReplace("Tooltip = 'mine OR build through players and npcs'\n\t})\nend)",
+        [==[Tooltip = 'mine OR build through players and npcs'
+    })
+    FrontDistanceSlider = PhaseMine:CreateSlider({
+        Name = 'Corridor Distance',
+        Min = 5,
+        Max = 60,
+        Default = 20,
+        Suffix = 'studs'
+    })
+end)]==],
+        'PhaseMine settings slider')
     bedwarsSource = bedwarsSource:sub(1, first - 1) .. phaseSource .. bedwarsSource:sub(finish + 1)
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
