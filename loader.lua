@@ -932,7 +932,7 @@ if gameFileId == 6872274481 then
 end)]==],
         'PhaseMine settings slider')
     phaseReplace("Name = 'PhaseMine',", "Name = 'LegitMine',", 'display name')
-    phaseReplace("    HephCheck = PhaseMine:CreateToggle({\n        Name = 'HephCheck',\n        Default = false\n    })", [==[    HephCheck = PhaseMine:CreateToggle({
+    phaseReplace("    HephCheck = PhaseMine:CreateToggle({\n        Name = 'HephCheck',\n        Default = false,\n        Tooltip = 'checks if theres a fat heph blocking'\n    })", [==[    HephCheck = PhaseMine:CreateToggle({
         Name = 'HephCheck',
         Default = false
     })
