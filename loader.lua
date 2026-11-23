@@ -13,6 +13,7 @@ local function executorFamily(name)
     local normal = name:lower():match('^%s*(.-)%s*$')
     if normal == 'potassium' or normal:match('^potassium[%s%p]') then return 'Potassium' end
     if normal == 'real' or normal:match('^real[%s%p]') then return 'Real' end
+    if normal == 'volt' or normal:match('^volt[%s%p]') then return 'Volt' end
     return nil
 end
 
@@ -25,7 +26,7 @@ if type(identifyexecutor) == 'function' then
         executorKind = executorFamily(name)
     end
 end
--- Real also documents getexecutorname(); use it only as a fallback.
+-- Fall back to getexecutorname() if the first identification is unavailable or unrecognized.
 if not executorKind and type(getexecutorname) == 'function' then
     local ok, name = pcall(getexecutorname)
     if ok and type(name) == 'string' then
@@ -119,7 +120,7 @@ local function rejectAndUninject(message)
 end
 
 if not executorKind then
-    rejectAndUninject('Only Potassium and Real are supported. Detected: ' .. detectedName .. '. Nothing was loaded.')
+    rejectAndUninject('Only Potassium, Real, and Volt are supported. Detected: ' .. detectedName .. '. Nothing was loaded.')
     return nil
 end
 
