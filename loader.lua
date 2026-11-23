@@ -789,39 +789,25 @@ if gameFileId == 6872274481 then
     local TreeCheck, HephCheck
 
     local function hasMiningToolEquipped()
-        local inventoryStore = bedwars.Store
-        local hand
-        if inventoryStore then
-            local ok, state = pcall(function() return inventoryStore:getState() end)
-            local inventory = ok and state and state.Inventory
-            local observed = inventory and inventory.observedInventory
-            hand = observed and observed.inventory and observed.inventory.hand
-        end
+        -- AeroV4's BedWars inventory wrapper returns the currently held item
+        -- as inventory.hand.itemType, without relying on Roblox Tool instances.
+        local inventory = bedwars.getInventory and bedwars.getInventory(lplr)
+        local hand = inventory and inventory.hand
         local itemType = hand and hand.itemType
-        if not itemType then
-            local character = lplr.Character
-            local tool = character and character:FindFirstChildOfClass('Tool')
-            itemType = tool and tool.Name
-        end
         if type(itemType) ~= 'string' then return false end
-        itemType = itemType:lower()
-        local tier, kind = itemType:match('^(%a+)_(pickaxe)$')
-        if not tier then tier, kind = itemType:match('^(%a+)_(axe)$') end
-        return kind ~= nil and ({
-            wood = true,
-            stone = true,
-            iron = true,
-            diamond = true
-        })[tier] == true
+        return ({
+            wood_pickaxe = true, stone_pickaxe = true,
+            iron_pickaxe = true, diamond_pickaxe = true,
+            wood_axe = true, stone_axe = true,
+            iron_axe = true, diamond_axe = true
+        })[itemType:lower()] == true
     end
 
     local function matchesCheckedKit(model)
         local player = game:GetService('Players'):GetPlayerFromCharacter(model)
         if not player then return false end
+        -- AeroV4 reads PlayingAsKits and tokenizes it for multiple active kits.
         local kits = player:GetAttribute('PlayingAsKits')
-        if type(kits) ~= 'string' then
-            kits = player:GetAttribute('PlayingAsKit')
-        end
         if type(kits) ~= 'string' then return false end
         for kit in kits:lower():gmatch('[%w_]+') do
             if TreeCheck and TreeCheck.Enabled
@@ -934,7 +920,8 @@ end)]==],
     phaseReplace("Name = 'PhaseMine',", "Name = 'LegitMine',", 'display name')
     phaseReplace("    HephCheck = PhaseMine:CreateToggle({\n        Name = 'HephCheck',\n        Default = false,\n        Tooltip = 'checks if theres a fat heph blocking'\n    })", [==[    HephCheck = PhaseMine:CreateToggle({
         Name = 'HephCheck',
-        Default = false
+        Default = false,
+        Tooltip = 'checks if theres a fat heph blocking'
     })
     vape.ModuleAliases = vape.ModuleAliases or {}
     vape.ModuleAliases.LegitMine = {'PhaseMine'}]==], 'search alias')
