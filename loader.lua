@@ -758,7 +758,7 @@ if gameFileId == 6872274481 then
         "PhaseMine = vape.Categories['Experimental (Ban)']:CreateModule({",
         'original PhaseMine experimental category')
 
-    -- Add an independent pause state for entities inside the cursor's invisible FOV.
+    -- Pause only with a wood-to-diamond axe or pickaxe equipped and a check triggered.
     -- Adjust only the PhaseMine block, not other BedWars modules.
     local phaseStart = "run(function()\n\tlocal PhaseMine\n"
     local phaseEnd = "Tooltip = 'mine OR build through players and npcs'\n\t})\nend)"
@@ -785,9 +785,35 @@ if gameFileId == 6872274481 then
     local function maxFrontEntities()
         return EntityLimitSlider and EntityLimitSlider.Value or 3
     end
-    local FRONT_DISTANCE = 20
     local CURSOR_RADIUS_PIXELS = 45
     local TreeCheck, HephCheck
+
+    local function hasMiningToolEquipped()
+        local inventoryStore = bedwars.Store
+        local hand
+        if inventoryStore then
+            local ok, state = pcall(function() return inventoryStore:getState() end)
+            local inventory = ok and state and state.Inventory
+            local observed = inventory and inventory.observedInventory
+            hand = observed and observed.inventory and observed.inventory.hand
+        end
+        local itemType = hand and hand.itemType
+        if not itemType then
+            local character = lplr.Character
+            local tool = character and character:FindFirstChildOfClass('Tool')
+            itemType = tool and tool.Name
+        end
+        if type(itemType) ~= 'string' then return false end
+        itemType = itemType:lower()
+        local tier, kind = itemType:match('^(%a+)_(pickaxe)$')
+        if not tier then tier, kind = itemType:match('^(%a+)_(axe)$') end
+        return kind ~= nil and ({
+            wood = true,
+            stone = true,
+            iron = true,
+            diamond = true
+        })[tier] == true
+    end
 
     local function matchesCheckedKit(model)
         local player = game:GetService('Players'):GetPlayerFromCharacter(model)
@@ -815,8 +841,6 @@ if gameFileId == 6872274481 then
         local root = character and character:FindFirstChild('HumanoidRootPart')
         local camera = workspace.CurrentCamera
         if not root or not camera then return 0 end
-        local origin = root.Position
-        local forward = camera.CFrame.LookVector
         local counted = {}
         local count = 0
         local function checkCharacter(model)
@@ -825,8 +849,6 @@ if gameFileId == 6872274481 then
             local humanoid = model:FindFirstChildOfClass('Humanoid')
             local targetRoot = model:FindFirstChild('HumanoidRootPart') or model.PrimaryPart
             if not humanoid or humanoid.Health <= 0 or not targetRoot then return end
-            local maxDistance = FrontDistanceSlider and FrontDistanceSlider.Value or 18
-            if (targetRoot.Position - root.Position).Magnitude > maxDistance then return end
             local point, visible = camera:WorldToViewportPoint(targetRoot.Position)
             if not visible or point.Z <= 0 then return end
             local inset = game:GetService('GuiService'):GetGuiInset()
@@ -868,14 +890,14 @@ if gameFileId == 6872274481 then
         "local function ignorePart(part)\n                    if paused then return end\n\t\t\t\t\tpcall(function()",
         'prevent query ignores while paused')
     phaseReplace("if callback then\n\n\t\t\t\tlocal function ignorePart",
-        "if callback then\n                pauseGeneration = pauseGeneration + 1\n                local generation = pauseGeneration\n                paused = false\n                setPaused(countFrontEntities() > maxFrontEntities())\n\n\t\t\t\tlocal function ignorePart",
+        "if callback then\n                pauseGeneration = pauseGeneration + 1\n                local generation = pauseGeneration\n                paused = false\n                setPaused(hasMiningToolEquipped() and countFrontEntities() > maxFrontEntities())\n\n\t\t\t\tlocal function ignorePart",
         'enable state setup')
     phaseReplace("setupAllCharacters()\n\t\t\t\tupdateCollision()\n",
         [==[setupAllCharacters()
                 updateCollision()
                 task.spawn(function()
                     while PhaseMine.Enabled and pauseGeneration == generation do
-                        setPaused(countFrontEntities() > maxFrontEntities())
+                        setPaused(hasMiningToolEquipped() and countFrontEntities() > maxFrontEntities())
                         task.wait(0.15)
                     end
                 end)
@@ -884,35 +906,28 @@ if gameFileId == 6872274481 then
     phaseReplace("\t\t\telse\n\t\t\t\tfor _, conn in ipairs(connections) do",
         "\t\t\telse\n                pauseGeneration = pauseGeneration + 1\n                setPaused(false)\n\t\t\t\tfor _, conn in ipairs(connections) do",
         'stop monitor and restore on disable')
-    -- Cursor-centered FOV checks use a 60-pixel radius in third person.
-    phaseReplace("local FRONT_DISTANCE = 20",
-        "local FrontDistanceSlider",
-        'corridor distance slider declaration')
+    -- Cursor-centered FOV checks use a 45-pixel radius in third person.
     -- Screen-space FOV uses WorldToViewportPoint and the mouse's viewport position.
-    -- Distance remains player-relative for reliable third-person use.
+    -- No stud-distance limit; entities and kits share the cursor FOV.
     phaseReplace("Tooltip = 'mine OR build through players and npcs'\n\t})\nend)",
         [==[Tooltip = 'mine OR build through players and npcs'
-    })
-    FrontDistanceSlider = PhaseMine:CreateSlider({
-        Name = 'Corridor Distance',
-        Min = 5,
-        Max = 18,
-        Default = 18,
-        Suffix = 'studs'
     })
     EntityLimitSlider = PhaseMine:CreateSlider({
         Name = 'Entity Limit',
         Min = 1,
         Max = 5,
-        Default = 3
+        Default = 3,
+        Tooltip = 'how many things infront before it doesnt phasemine'
     })
     TreeCheck = PhaseMine:CreateToggle({
         Name = 'TreeCheck',
-        Default = false
+        Default = false,
+        Tooltip = 'checks if there is a big tree blocking'
     })
     HephCheck = PhaseMine:CreateToggle({
         Name = 'HephCheck',
-        Default = false
+        Default = false,
+        Tooltip = 'checks if theres a fat heph blocking'
     })
 end)]==],
         'PhaseMine settings slider')
