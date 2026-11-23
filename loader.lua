@@ -790,7 +790,7 @@ if gameFileId == 6872274481 then
     local TreeCheck, HephCheck
 
     local function matchesCheckedKit(model)
-        local player = playersService:GetPlayerFromCharacter(model)
+        local player = game:GetService('Players'):GetPlayerFromCharacter(model)
         if not player then return false end
         local kits = player:GetAttribute('PlayingAsKits')
         if type(kits) ~= 'string' then
@@ -886,9 +886,12 @@ if gameFileId == 6872274481 then
     phaseReplace("local FRONT_DISTANCE = 20",
         "local FrontDistanceSlider",
         'corridor distance slider declaration')
-    phaseReplace("local origin = root.Position",
-        "local origin = camera.CFrame.Position",
-        'camera based corridor origin')
+    phaseReplace("local origin = root.Position\n        local forward = camera.CFrame.LookVector",
+        [==[local cursor = game:GetService('UserInputService'):GetMouseLocation()
+        local ray = camera:ViewportPointToRay(cursor.X, cursor.Y)
+        local origin = ray.Origin
+        local forward = ray.Direction.Unit]==],
+        'cursor aimed corridor ray')
     phaseReplace("along > FRONT_DISTANCE",
         "along > (FrontDistanceSlider and FrontDistanceSlider.Value or 20)",
         'live adjustable corridor distance')
@@ -918,6 +921,13 @@ if gameFileId == 6872274481 then
     })
 end)]==],
         'PhaseMine settings slider')
+    phaseReplace("Name = 'PhaseMine',", "Name = 'LegitMine',", 'display name')
+    phaseReplace("    HephCheck = PhaseMine:CreateToggle({\n        Name = 'HephCheck',\n        Default = false\n    })", [==[    HephCheck = PhaseMine:CreateToggle({
+        Name = 'HephCheck',
+        Default = false
+    })
+    vape.ModuleAliases = vape.ModuleAliases or {}
+    vape.ModuleAliases.LegitMine = {'PhaseMine'}]==], 'search alias')
     bedwarsSource = bedwarsSource:sub(1, first - 1) .. phaseSource .. bedwarsSource:sub(finish + 1)
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
