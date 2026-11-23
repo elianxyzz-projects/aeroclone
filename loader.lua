@@ -278,6 +278,192 @@ local filterCode = [==[
             end
         end
 
+
+        -- Compact warnings shown only in the LSHIFT/click GUI.
+        -- These are user-defined thresholds, not reliable ban predictions.
+        do
+            local gui = vape.gui
+            local scaled = gui and gui:FindFirstChild('ScaledGui')
+            local click = scaled and scaled:FindFirstChild('ClickGui')
+            if click then
+                local warnings = Instance.new('Frame')
+                warnings.Name = 'ElianBlatancyWarnings'
+                warnings.BackgroundTransparency = 1
+                warnings.AnchorPoint = Vector2.new(1, 0)
+                warnings.Position = UDim2.new(1, -12, 0, 12)
+                warnings.Size = UDim2.fromOffset(242, 112)
+                warnings.ZIndex = 100
+                warnings.Parent = click
+
+                local layout = Instance.new('UIListLayout')
+                layout.SortOrder = Enum.SortOrder.LayoutOrder
+                layout.Padding = UDim.new(0, 5)
+                layout.Parent = warnings
+
+                local function createWarning(order, message)
+                    local box = Instance.new('Frame')
+                    box.Name = 'Warning' .. order
+                    box.LayoutOrder = order
+                    box.Size = UDim2.new(1, 0, 0, 46)
+                    box.BackgroundColor3 = Color3.fromRGB(117, 23, 30)
+                    box.BorderSizePixel = 0
+                    box.Visible = false
+                    box.ZIndex = 101
+                    box.Parent = warnings
+                    local corner = Instance.new('UICorner')
+                    corner.CornerRadius = UDim.new(0, 6)
+                    corner.Parent = box
+                    local stroke = Instance.new('UIStroke')
+                    stroke.Color = Color3.fromRGB(235, 75, 84)
+                    stroke.Thickness = 1
+                    stroke.Parent = box
+                    local label = Instance.new('TextLabel')
+                    label.BackgroundTransparency = 1
+                    label.Position = UDim2.fromOffset(9, 4)
+                    label.Size = UDim2.new(1, -37, 1, -8)
+                    label.Font = Enum.Font.GothamMedium
+                    label.TextSize = 12
+                    label.TextWrapped = true
+                    label.TextXAlignment = Enum.TextXAlignment.Left
+                    label.TextYAlignment = Enum.TextYAlignment.Center
+                    label.TextColor3 = Color3.fromRGB(255, 243, 243)
+                    label.Text = message
+                    label.ZIndex = 102
+                    label.Parent = box
+                    local close = Instance.new('TextButton')
+                    close.Name = 'Dismiss'
+                    close.BackgroundTransparency = 1
+                    close.AnchorPoint = Vector2.new(1, 0)
+                    close.Position = UDim2.new(1, -5, 0, 4)
+                    close.Size = UDim2.fromOffset(22, 22)
+                    close.Font = Enum.Font.GothamBold
+                    close.TextSize = 16
+                    close.TextColor3 = Color3.fromRGB(255, 220, 220)
+                    close.Text = 'X'
+                    close.ZIndex = 103
+                    close.Parent = box
+                    return box, close
+                end
+
+                local banBox, banClose = createWarning(1, 'you can get banned for this')
+                local clipBox, clipClose = createWarning(2, 'if you clip this, you will get banned')
+                local dismissed = {ban = false, clip = false}
+                local priorSignature
+
+                banClose.MouseButton1Click:Connect(function()
+                    dismissed.ban = true
+                    banBox.Visible = false
+                end)
+                clipClose.MouseButton1Click:Connect(function()
+                    dismissed.clip = true
+                    clipBox.Visible = false
+                end)
+
+                local function normalize(value)
+                    return tostring(value or ''):lower():gsub('[^%w]', '')
+                end
+                local function getModule(name)
+                    local target = normalize(name)
+                    for _, modules in ipairs({vape.Modules or {}, (vape.Legit and vape.Legit.Modules) or {}}) do
+                        for key, module in pairs(modules) do
+                            if normalize(key) == target then return module end
+                        end
+                    end
+                end
+                local function findOption(module, ...)
+                    if type(module) ~= 'table' then return nil end
+                    local keys = {...}
+                    for _, key in ipairs(keys) do
+                        for name, option in pairs(module.Options or {}) do
+                            if normalize(name) == normalize(key) then return option end
+                        end
+                    end
+                    return nil
+                end
+                local function numberOption(module, ...)
+                    local option = findOption(module, ...)
+                    if not option then return nil end
+                    return tonumber(option.Value or option.CurrentValue)
+                end
+                local function selectedOption(module, ...)
+                    local option = findOption(module, ...)
+                    if not option then return nil end
+                    return tostring(option.Value or option.Selected or option.Mode or '')
+                end
+                local function readPing()
+                    local player = game:GetService('Players').LocalPlayer
+                    if not player then return nil end
+                    local ok, seconds = pcall(function() return player:GetNetworkPing() end)
+                    if ok and type(seconds) == 'number' then
+                        return seconds * 2000 -- round-trip latency, ms
+                    end
+                    return nil
+                end
+
+                local function check()
+                    local reach = getModule('Reach')
+                    local hitboxes = getModule('HitBoxes')
+                    local silent = getModule('SilentAim')
+                    local air = getModule('AirReach') or reach
+                    local r = reach and reach.Enabled and numberOption(reach, 'Attack', 'Reach', 'Distance')
+                    local h = hitboxes and hitboxes.Enabled and numberOption(hitboxes, 'Expand', 'Size', 'Hitbox', 'HitBoxes')
+                    local ping = readPing()
+                    local airPct = air and air.Enabled and numberOption(air, 'Air Hits Percentage', 'AirHitsPercentage', 'Air Hits', 'AirHits', 'Percentage')
+                    local fov = silent and silent.Enabled and numberOption(silent, 'FOV')
+                    local mode = selectedOption(silent, 'Mode', 'Target Mode', 'Targeting Mode') or ''
+                    local distanceMode = normalize(mode):find('distance', 1, true) ~= nil
+
+                    local ban = (h ~= nil and h > 25 and r ~= nil and r > 13.5 and ping ~= nil and ping < 130)
+                        or (r ~= nil and r >= 16)
+                        or (r ~= nil and r >= 15 and ping ~= nil and ping > 200)
+                        or (airPct ~= nil and airPct > 85)
+                        or (fov ~= nil and (fov > 85 or (fov > 40 and not distanceMode)))
+
+                    local render = false
+                    local renderNames = {
+                        ESP = true, KitESP = true, KitRender = true, NameTags = true,
+                        BedPlates = true
+                    }
+                    for _, modules in ipairs({vape.Modules or {}, (vape.Legit and vape.Legit.Modules) or {}}) do
+                        for name, module in pairs(modules) do
+                            if type(module) == 'table' and module.Enabled then
+                                local category = module.Category
+                                local categoryName = type(category) == 'table' and category.Name or category
+                                if renderNames[name] or categoryName == 'Render' then
+                                    render = true
+                                    break
+                                end
+                            end
+                        end
+                        if render then break end
+                    end
+                    return ban, render, table.concat({
+                        tostring(reach and reach.Enabled), tostring(r), tostring(hitboxes and hitboxes.Enabled),
+                        tostring(h), tostring(math.floor((ping or -1) / 5)), tostring(airPct),
+                        tostring(silent and silent.Enabled), tostring(fov), mode, tostring(render)
+                    }, '|')
+                end
+
+                task.spawn(function()
+                    while click.Parent and gui.Parent do
+                        local ok, ban, clip, signature = pcall(check)
+                        if ok then
+                            if signature ~= priorSignature then
+                                priorSignature = signature
+                                dismissed.ban = false
+                                dismissed.clip = false
+                            end
+                            banBox.Visible = ban and not dismissed.ban
+                            clipBox.Visible = clip and not dismissed.clip
+                        end
+                        task.wait(0.25)
+                    end
+                end)
+            else
+                warn('[AeroV4 Lite] Warning UI unavailable: ClickGui not found')
+            end
+        end
+
         -- Previous full-client profiles must not reveal hidden categories.
         local experimentalFirstLoad = true
         local upstreamLoad = vape.Load
