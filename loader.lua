@@ -752,6 +752,11 @@ if gameFileId == 6872274481 then
     bedwarsSource = capSlider(bedwarsSource, 'Mine = Reach:CreateSlider({', 16)
     bedwarsSource = capSlider(bedwarsSource, 'FOV = SilentAim:CreateSlider({', 100)
     bedwarsSource = patchHitFix(bedwarsSource)
+    -- Keep the original AeroV4 PhaseMine implementation unchanged; show it in Experimental.
+    bedwarsSource = replaceOnce(bedwarsSource,
+        'PhaseMine = vape.Categories.World:CreateModule({',
+        "PhaseMine = vape.Categories['Experimental (Ban)']:CreateModule({",
+        'original PhaseMine experimental category')
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
