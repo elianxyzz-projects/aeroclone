@@ -781,7 +781,10 @@ if gameFileId == 6872274481 then
     local descConnections = {}
     local paused = false
     local pauseGeneration = 0
-    local MAX_FRONT_ENTITIES = 3
+    local EntityLimitSlider
+    local function maxFrontEntities()
+        return EntityLimitSlider and EntityLimitSlider.Value or 3
+    end
     local FRONT_DISTANCE = 20
     local FRONT_WIDTH = 4.5
     local TreeCheck, HephCheck
@@ -828,7 +831,7 @@ if gameFileId == 6872274481 then
             local sideways = (relative - forward * along).Magnitude
             if sideways <= FRONT_WIDTH then
                 if matchesCheckedKit(model) then
-                    count = MAX_FRONT_ENTITIES + 1
+                    count = maxFrontEntities() + 1
                 else
                     count = count + 1
                 end
@@ -836,11 +839,11 @@ if gameFileId == 6872274481 then
         end
         for _, entity in ipairs(entitylib.List) do
             checkCharacter(entity.Character)
-            if count > MAX_FRONT_ENTITIES then return count end
+            if count > maxFrontEntities() then return count end
         end
         for _, model in ipairs(workspace:GetChildren()) do
             if model:IsA('Model') then checkCharacter(model) end
-            if count > MAX_FRONT_ENTITIES then return count end
+            if count > maxFrontEntities() then return count end
         end
         return count
     end
@@ -863,14 +866,14 @@ if gameFileId == 6872274481 then
         "local function ignorePart(part)\n                    if paused then return end\n\t\t\t\t\tpcall(function()",
         'prevent query ignores while paused')
     phaseReplace("if callback then\n\n\t\t\t\tlocal function ignorePart",
-        "if callback then\n                pauseGeneration = pauseGeneration + 1\n                local generation = pauseGeneration\n                paused = false\n                setPaused(countFrontEntities() > MAX_FRONT_ENTITIES)\n\n\t\t\t\tlocal function ignorePart",
+        "if callback then\n                pauseGeneration = pauseGeneration + 1\n                local generation = pauseGeneration\n                paused = false\n                setPaused(countFrontEntities() > maxFrontEntities())\n\n\t\t\t\tlocal function ignorePart",
         'enable state setup')
     phaseReplace("setupAllCharacters()\n\t\t\t\tupdateCollision()\n",
         [==[setupAllCharacters()
                 updateCollision()
                 task.spawn(function()
                     while PhaseMine.Enabled and pauseGeneration == generation do
-                        setPaused(countFrontEntities() > MAX_FRONT_ENTITIES)
+                        setPaused(countFrontEntities() > maxFrontEntities())
                         task.wait(0.15)
                     end
                 end)
@@ -898,6 +901,12 @@ if gameFileId == 6872274481 then
         Max = 60,
         Default = 20,
         Suffix = 'studs'
+    })
+    EntityLimitSlider = PhaseMine:CreateSlider({
+        Name = 'Entity Limit',
+        Min = 1,
+        Max = 5,
+        Default = 3
     })
     TreeCheck = PhaseMine:CreateToggle({
         Name = 'TreeCheck',
