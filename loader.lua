@@ -758,7 +758,7 @@ if gameFileId == 6872274481 then
         "PhaseMine = vape.Categories['Experimental (Ban)']:CreateModule({",
         'original PhaseMine experimental category')
 
-    -- Add a non-toggling pause state to PhaseMine when >3 characters are in front.
+    -- Add an independent pause state for entities inside the cursor's invisible FOV.
     -- Adjust only the PhaseMine block, not other BedWars modules.
     local phaseStart = "run(function()\n\tlocal PhaseMine\n"
     local phaseEnd = "Tooltip = 'mine OR build through players and npcs'\n\t})\nend)"
@@ -786,7 +786,7 @@ if gameFileId == 6872274481 then
         return EntityLimitSlider and EntityLimitSlider.Value or 3
     end
     local FRONT_DISTANCE = 20
-    local FRONT_WIDTH = 4.5
+    local CURSOR_RADIUS_PIXELS = 60
     local TreeCheck, HephCheck
 
     local function matchesCheckedKit(model)
@@ -825,11 +825,13 @@ if gameFileId == 6872274481 then
             local humanoid = model:FindFirstChildOfClass('Humanoid')
             local targetRoot = model:FindFirstChild('HumanoidRootPart') or model.PrimaryPart
             if not humanoid or humanoid.Health <= 0 or not targetRoot then return end
-            local relative = targetRoot.Position - origin
-            local along = relative:Dot(forward)
-            if along <= 0 or along > FRONT_DISTANCE then return end
-            local sideways = (relative - forward * along).Magnitude
-            if sideways <= FRONT_WIDTH then
+            local maxDistance = FrontDistanceSlider and FrontDistanceSlider.Value or 18
+            if (targetRoot.Position - root.Position).Magnitude > maxDistance then return end
+            local point, visible = camera:WorldToViewportPoint(targetRoot.Position)
+            if not visible or point.Z <= 0 then return end
+            local inset = game:GetService('GuiService'):GetGuiInset()
+            local cursor = game:GetService('UserInputService'):GetMouseLocation() - inset
+            if (Vector2.new(point.X, point.Y) - cursor).Magnitude <= CURSOR_RADIUS_PIXELS then
                 if matchesCheckedKit(model) then
                     count = maxFrontEntities() + 1
                 else
@@ -882,27 +884,20 @@ if gameFileId == 6872274481 then
     phaseReplace("\t\t\telse\n\t\t\t\tfor _, conn in ipairs(connections) do",
         "\t\t\telse\n                pauseGeneration = pauseGeneration + 1\n                setPaused(false)\n\t\t\t\tfor _, conn in ipairs(connections) do",
         'stop monitor and restore on disable')
-    -- Camera-centered detection works with third-person aiming; distance is user-adjustable.
+    -- Cursor-centered FOV checks use a 60-pixel radius in third person.
     phaseReplace("local FRONT_DISTANCE = 20",
         "local FrontDistanceSlider",
         'corridor distance slider declaration')
-    phaseReplace("local origin = root.Position\n        local forward = camera.CFrame.LookVector",
-        [==[local cursor = game:GetService('UserInputService'):GetMouseLocation()
-        local ray = camera:ViewportPointToRay(cursor.X, cursor.Y)
-        local origin = ray.Origin
-        local forward = ray.Direction.Unit]==],
-        'cursor aimed corridor ray')
-    phaseReplace("along > FRONT_DISTANCE",
-        "along > (FrontDistanceSlider and FrontDistanceSlider.Value or 20)",
-        'live adjustable corridor distance')
+    -- Screen-space FOV uses WorldToViewportPoint and the mouse's viewport position.
+    -- Distance remains player-relative for reliable third-person use.
     phaseReplace("Tooltip = 'mine OR build through players and npcs'\n\t})\nend)",
         [==[Tooltip = 'mine OR build through players and npcs'
     })
     FrontDistanceSlider = PhaseMine:CreateSlider({
         Name = 'Corridor Distance',
         Min = 5,
-        Max = 60,
-        Default = 20,
+        Max = 18,
+        Default = 18,
         Suffix = 'studs'
     })
     EntityLimitSlider = PhaseMine:CreateSlider({
