@@ -7,7 +7,7 @@ A pared-down module view using the **original AeroV4 GUI** and each retained mod
 **Execute this only in a Roblox environment and executor you trust, after reviewing the source.**
 
 ~~~lua
-loadstring(game:HttpGet('https://raw.githubusercontent.com/elianxyzz-projects/aeroclone/main/loader.lua', true))()
+loadstring(game:HttpGet('https://raw.githubusercontent.com/elianxyzz-projects/elianware/main/loader.lua', true))()
 ~~~
 
 Source: [loader.lua](./loader.lua) — the script the loadstring fetches.
@@ -45,18 +45,19 @@ Official announcement: https://devforum.roblox.com/t/allowlist-for-local-client-
 
 This script modifies the executor's **aerov4/** file cache. Back up original profiles before mixing it with an unmodified AeroV4 installation, and don't run both in the same game session.
 
-## Potassium and Real — enforced executor check
+## Potassium, Real, and Volt — enforced executor check
 
-At startup, the loader checks identifyexecutor(), with getexecutorname() as a fallback if the first name is unavailable or unsupported. Executor name detection is case-insensitive and accepts only Potassium or Real.
+At startup, the loader checks identifyexecutor(), with getexecutorname() as a fallback if the first name is unavailable or unsupported. Executor name detection is case-insensitive and accepts Potassium, Real, or Volt.
 
 - **Potassium:** HitFix uses Potassium's documented debug.getconstant, debug.setconstant, debug.getupvalue and debug.setupvalue APIs.
 - **Real:** HitFix uses Real's documented getconstant, setconstant, getupvalue and setupvalue APIs (falling back to Real's debug.* aliases).
+- **Volt:** Documented debug.getconstant, debug.setconstant, debug.getupvalue and debug.setupvalue APIs are available; behavior has not been verified in this AeroV4 build.
 - **Any other executor or an unknown name:** the loader attempts to uninject any existing AeroV4 interface, displays a red error in the upper-right for 18 seconds, and stops before downloading modules or modifying cached files.
-- **A supported executor missing essential HitFix APIs:** likewise stops and displays an error rather than offering a broken HitFix module.
+- **A supported executor missing a required API:** individual features may fail or produce warnings; the loader checks essential filesystem APIs before caching.
 
 The selected HitFix adapter is the only one used during a given load. Its patch still targets the original BedWars sword-swing function, and now records/restores the original constant and upvalue when disabled. Settings are preserved. The loader also validates basic filesystem functions before caching.
 
-**Not verified end to end:** no tests have been run in a live Roblox BedWars client using Potassium or Real. The pinned upstream module code and local static checks do not guarantee that HitFix—or every other module—works on all executor versions or after game updates.
+**Not verified end to end:** no tests have been run in a live Roblox BedWars client using Potassium, Real, or Volt. The pinned upstream module code and local static checks do not guarantee that HitFix—or every other module—works on all executor versions or after game updates.
 
 ## Config saving and first-run behavior
 
@@ -68,7 +69,7 @@ This fixes the temporary version that forced every module off on every launch. *
 
 ## Unsupported-executor error notification
 
-The executor check runs before file writes. If neither Potassium nor Real is detected (or if essential HitFix APIs are unavailable), the loader attempts to uninject an existing AeroV4 instance, **stops**, and displays a red **top-right** message for roughly 18 seconds. It first tries Roblox PlayerGui so the notification is independent of AeroV4's own notification settings; if UI construction fails, it attempts Roblox's built-in notification API. The original AeroV4 notification system remains available for regular module messages.
+The executor check runs before file writes. If none of Potassium, Real, or Volt is detected, the loader attempts to uninject an existing AeroV4 instance, **stops**, and displays a red **top-right** message for roughly 18 seconds. It first tries Roblox PlayerGui so the notification is independent of AeroV4's own notification settings; if UI construction fails, it attempts Roblox's built-in notification API. The original AeroV4 notification system remains available for regular module messages.
 
 **Verification limit:** source inspection and static tests confirm the display code and startup gate, but a rendered notification and executor-specific behavior have not been tested in a running Roblox client.
 
