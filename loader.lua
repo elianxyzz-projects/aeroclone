@@ -835,7 +835,7 @@ if gameFileId == 6872274481 then
         "local function ignorePart(part)\n                    if paused then return end\n\t\t\t\t\tpcall(function()",
         'prevent query ignores while paused')
     phaseReplace("if callback then\n\n\t\t\t\tlocal function ignorePart",
-        "if callback then\n                pauseGeneration = pauseGeneration + 1\n                local generation = pauseGeneration\n                paused = false\n\n\t\t\t\tlocal function ignorePart",
+        "if callback then\n                pauseGeneration = pauseGeneration + 1\n                local generation = pauseGeneration\n                paused = false\n                setPaused(countFrontEntities() > MAX_FRONT_ENTITIES)\n\n\t\t\t\tlocal function ignorePart",
         'enable state setup')
     phaseReplace("setupAllCharacters()\n\t\t\t\tupdateCollision()\n",
         [==[setupAllCharacters()
