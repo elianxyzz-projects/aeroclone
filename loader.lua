@@ -784,6 +784,28 @@ if gameFileId == 6872274481 then
     local MAX_FRONT_ENTITIES = 3
     local FRONT_DISTANCE = 20
     local FRONT_WIDTH = 4.5
+    local TreeCheck, HephCheck
+
+    local function matchesCheckedKit(model)
+        local player = playersService:GetPlayerFromCharacter(model)
+        if not player then return false end
+        local kits = player:GetAttribute('PlayingAsKits')
+        if type(kits) ~= 'string' then
+            kits = player:GetAttribute('PlayingAsKit')
+        end
+        if type(kits) ~= 'string' then return false end
+        for kit in kits:lower():gmatch('[%w_]+') do
+            if TreeCheck and TreeCheck.Enabled
+                and (kit == 'bigman' or kit == 'eldertree' or kit == 'elder_tree') then
+                return true
+            end
+            if HephCheck and HephCheck.Enabled
+                and (kit == 'tinker' or kit == 'hephaestus') then
+                return true
+            end
+        end
+        return false
+    end
 
     local function countFrontEntities()
         local character = lplr.Character
@@ -804,7 +826,13 @@ if gameFileId == 6872274481 then
             local along = relative:Dot(forward)
             if along <= 0 or along > FRONT_DISTANCE then return end
             local sideways = (relative - forward * along).Magnitude
-            if sideways <= FRONT_WIDTH then count = count + 1 end
+            if sideways <= FRONT_WIDTH then
+                if matchesCheckedKit(model) then
+                    count = MAX_FRONT_ENTITIES + 1
+                else
+                    count = count + 1
+                end
+            end
         end
         for _, entity in ipairs(entitylib.List) do
             checkCharacter(entity.Character)
@@ -870,6 +898,14 @@ if gameFileId == 6872274481 then
         Max = 60,
         Default = 20,
         Suffix = 'studs'
+    })
+    TreeCheck = PhaseMine:CreateToggle({
+        Name = 'TreeCheck',
+        Default = false
+    })
+    HephCheck = PhaseMine:CreateToggle({
+        Name = 'HephCheck',
+        Default = false
     })
 end)]==],
         'PhaseMine settings slider')
