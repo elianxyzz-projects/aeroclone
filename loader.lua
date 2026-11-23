@@ -757,6 +757,101 @@ if gameFileId == 6872274481 then
         'PhaseMine = vape.Categories.World:CreateModule({',
         "PhaseMine = vape.Categories['Experimental (Ban)']:CreateModule({",
         'original PhaseMine experimental category')
+
+    -- Add a non-toggling pause state to PhaseMine when >3 characters are in front.
+    -- Adjust only the PhaseMine block, not other BedWars modules.
+    local phaseStart = "run(function()\n\tlocal PhaseMine\n"
+    local phaseEnd = "Tooltip = 'mine OR build through players and npcs'\n\t})\nend)"
+    local first = bedwarsSource:find(phaseStart, 1, true)
+    local finish = first and bedwarsSource:find(phaseEnd, first, true)
+    if not first or not finish then
+        error('[AeroV4 Lite] PhaseMine module boundaries not found')
+    end
+    finish = finish + #phaseEnd - 1
+    local phaseSource = bedwarsSource:sub(first, finish)
+    local function phaseReplace(before, after, name)
+        local start = phaseSource:find(before, 1, true)
+        if not start or phaseSource:find(before, start + #before, true) then
+            error('[AeroV4 Lite] Unexpected PhaseMine patch marker: ' .. name)
+        end
+        phaseSource = phaseSource:sub(1, start - 1) .. after .. phaseSource:sub(start + #before)
+    end
+    phaseReplace("local tracked = {}\n\tlocal descConnections = {}",
+        [==[local tracked = {}
+    local descConnections = {}
+    local paused = false
+    local pauseGeneration = 0
+    local MAX_FRONT_ENTITIES = 3
+    local FRONT_DISTANCE = 20
+    local FRONT_WIDTH = 4.5
+
+    local function countFrontEntities()
+        local character = lplr.Character
+        local root = character and character:FindFirstChild('HumanoidRootPart')
+        local camera = workspace.CurrentCamera
+        if not root or not camera then return 0 end
+        local origin = root.Position
+        local forward = camera.CFrame.LookVector
+        local counted = {}
+        local count = 0
+        local function checkCharacter(model)
+            if not model or model == character or counted[model] or not model.Parent then return end
+            counted[model] = true
+            local humanoid = model:FindFirstChildOfClass('Humanoid')
+            local targetRoot = model:FindFirstChild('HumanoidRootPart') or model.PrimaryPart
+            if not humanoid or humanoid.Health <= 0 or not targetRoot then return end
+            local relative = targetRoot.Position - origin
+            local along = relative:Dot(forward)
+            if along <= 0 or along > FRONT_DISTANCE then return end
+            local sideways = (relative - forward * along).Magnitude
+            if sideways <= FRONT_WIDTH then count = count + 1 end
+        end
+        for _, entity in ipairs(entitylib.List) do
+            checkCharacter(entity.Character)
+            if count > MAX_FRONT_ENTITIES then return count end
+        end
+        for _, model in ipairs(workspace:GetChildren()) do
+            if model:IsA('Model') then checkCharacter(model) end
+            if count > MAX_FRONT_ENTITIES then return count end
+        end
+        return count
+    end
+
+    local function setPaused(value)
+        if paused == value then return end
+        paused = value
+        for _, parts in pairs(tracked) do
+            for part in pairs(parts) do
+                if part.Parent then
+                    pcall(function()
+                        bedwars.QueryUtil:setQueryIgnored(part, not paused)
+                    end)
+                end
+            end
+        end
+    end]==],
+        'pause state and front entity detection')
+    phaseReplace("local function ignorePart(part)\n\t\t\t\t\tpcall(function()",
+        "local function ignorePart(part)\n                    if paused then return end\n\t\t\t\t\tpcall(function()",
+        'prevent query ignores while paused')
+    phaseReplace("if callback then\n\n\t\t\t\tlocal function ignorePart",
+        "if callback then\n                pauseGeneration = pauseGeneration + 1\n                local generation = pauseGeneration\n                paused = false\n\n\t\t\t\tlocal function ignorePart",
+        'enable state setup')
+    phaseReplace("setupAllCharacters()\n\t\t\t\tupdateCollision()\n",
+        [==[setupAllCharacters()
+                updateCollision()
+                task.spawn(function()
+                    while PhaseMine.Enabled and pauseGeneration == generation do
+                        setPaused(countFrontEntities() > MAX_FRONT_ENTITIES)
+                        task.wait(0.15)
+                    end
+                end)
+]==],
+        'independent pause monitor')
+    phaseReplace("\t\t\telse\n\t\t\t\tfor _, conn in ipairs(connections) do",
+        "\t\t\telse\n                pauseGeneration = pauseGeneration + 1\n                setPaused(false)\n\t\t\t\tfor _, conn in ipairs(connections) do",
+        'stop monitor and restore on disable')
+    bedwarsSource = bedwarsSource:sub(1, first - 1) .. phaseSource .. bedwarsSource:sub(finish + 1)
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
