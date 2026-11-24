@@ -3,8 +3,8 @@
 -- Upstream: https://github.com/wrealaero/aerov4
 
 repeat task.wait() until game:IsLoaded()
--- Wait 10 seconds after the game has finished loading before initializing Aero.
-task.wait(10)
+-- Wait 5 seconds after the game has finished loading before initializing Aero.
+task.wait(5)
 
 -- Verify executor identity before downloading, running modules, or modifying any files.
 -- Only exact name prefixes are allowed; names are case-insensitive.
@@ -207,7 +207,14 @@ local filterCode = [==[
             FPSBoost = true,
             AutoTool = true,
             Freecam = true,
-            FOV = true
+            FOV = true,
+            LegitMine = true,
+            FallDamageHUD = true,
+            CombatPing = true,
+            HitDelayGraph = true,
+            FrameTimeGraph = true,
+            DamageTakenGraph = true,
+            MovementSpeedGraph = true
         }
         local keepCategories = {
             Main = true,
@@ -223,7 +230,8 @@ local filterCode = [==[
             Kits = true,
             Minigames = true,
             Legit = true,
-            ['Experimental (Ban)'] = true
+            ['Experimental (Ban)'] = true,
+            Debug = true
         }
         local function pruneModules(tab)
             if type(tab) ~= 'table' then return end
@@ -243,6 +251,248 @@ local filterCode = [==[
                     warn('[AeroV4 Lite] Could not remove ' .. moduleName .. ': ' .. tostring(err))
                 end
             end
+        end
+
+        -- Register the optional HUD independently before pruning modules.
+        if game.PlaceId == 6872274481 then
+            local ok, err = pcall(function()
+                do
+                    local api = vape
+                    local category = api and api.Categories['Experimental (Ban)']
+                    if category then
+                        local players = game:GetService('Players')
+                        local runService = game:GetService('RunService')
+                        local player = players.LocalPlayer
+                        local BLOCK = 3
+                        local MAX_DEPTH = 512
+                        local VOID_DEPTH = 150
+                        -- Provisional BedWars damage curve; verify in private matches.
+                        local SAFE_DROP = 21
+                        local DAMAGE_PER_STUD = 1
+                        local module
+                
+                        local function visible(gui)
+                            local node = gui
+                            while node do
+                                if node:IsA('GuiObject') and not node.Visible then return false end
+                                if node:IsA('ScreenGui') then return node.Enabled end
+                                node = node.Parent
+                            end
+                            return false
+                        end
+                
+                        local function findHealthBar(playerGui, ownGui, humanoid)
+                            local camera = workspace.CurrentCamera
+                            if not camera then return nil end
+                            local viewport = camera.ViewportSize
+                            local best, bestScore
+                            for _, obj in ipairs(playerGui:GetDescendants()) do
+                                if obj:IsA('GuiObject') and not obj:IsDescendantOf(ownGui) then
+                                    local name = obj.Name:lower():gsub('[^%w]', '')
+                                    local score = 0
+                                    if name == 'healthbar' then score = 100
+                                    elseif name:find('healthbar', 1, true) or name:find('healthmeter', 1, true) then score = 80
+                                    elseif name == 'health' or name == 'healthcontainer' or name == 'healthfill' then score = 60
+                                    end
+                                    local candidate = obj
+                                    if score == 0 and obj:IsA('TextLabel') then
+                                        local text = obj.Text:gsub('%s', '')
+                                        local hp = tostring(math.floor(humanoid.Health + 0.5))
+                                        local maxHp = tostring(math.floor(humanoid.MaxHealth + 0.5))
+                                        if text == hp .. '/' .. maxHp or text == hp .. 'HP' then
+                                            candidate = obj.Parent
+                                            score = 40
+                                        end
+                                    end
+                                    if score > 0 and candidate and candidate:IsA('GuiObject') and visible(candidate) then
+                                        local size, pos = candidate.AbsoluteSize, candidate.AbsolutePosition
+                                        local center = pos.X + size.X * 0.5
+                                        if size.X >= 70 and size.X <= viewport.X * 0.8
+                                            and size.Y >= 5 and size.Y <= 100
+                                            and pos.Y > viewport.Y * 0.52
+                                            and math.abs(center - viewport.X * 0.5) < viewport.X * 0.3 then
+                                            score = score - math.abs(center - viewport.X * 0.5) / 100
+                                            if not bestScore or score > bestScore then
+                                                best, bestScore = candidate, score
+                                            end
+                                        end
+                                    end
+                                end
+                            end
+                            return best
+                        end
+                
+                        local function preview(character, root, humanoid)
+                            local forward = humanoid.MoveDirection
+                            forward = Vector3.new(forward.X, 0, forward.Z)
+                            if forward.Magnitude < 0.05 then
+                                local look = root.CFrame.LookVector
+                                forward = Vector3.new(look.X, 0, look.Z)
+                            end
+                            if forward.Magnitude < 0.05 then return nil end
+                            forward = forward.Unit
+                            local right = Vector3.new(-forward.Z, 0, forward.X)
+                
+                            local excluded = {character}
+                            for _, other in ipairs(players:GetPlayers()) do
+                                if other ~= player and other.Character then
+                                    table.insert(excluded, other.Character)
+                                end
+                            end
+                            local params = RaycastParams.new()
+                            params.FilterType = Enum.RaycastFilterType.Exclude
+                            params.FilterDescendantsInstances = excluded
+                            params.RespectCanCollide = true
+                            params.IgnoreWater = true
+                
+                            -- Derive the foot plane from the avatar, not a saved world position.
+                            local footY = root.Position.Y - root.Size.Y * 0.5 - humanoid.HipHeight
+                            if humanoid.RigType == Enum.HumanoidRigType.R6 then
+                                local leg = character:FindFirstChild('Left Leg')
+                                footY = footY - (leg and leg.Size.Y or 2)
+                            end
+                            local support = workspace:Raycast(
+                                Vector3.new(root.Position.X, footY + 1.5, root.Position.Z),
+                                Vector3.new(0, -3, 0), params)
+                            if support then footY = support.Position.Y end
+                
+                            local origin = Vector3.new(root.Position.X, footY + 1.5, root.Position.Z)
+                            local maxDrop = 0
+                            -- Four rows cover the next two 3-stud blocks, three rays per row.
+                            -- Median depth avoids flagging an isolated edge sample as a hole.
+                            for row = 1, 4 do
+                                local depths = {}
+                                for _, offset in ipairs({-0.75, 0, 0.75}) do
+                                    local sample = origin + forward * (row * BLOCK * 0.5) + right * offset
+                                    local hit = workspace:Raycast(sample, Vector3.new(0, -MAX_DEPTH, 0), params)
+                                    table.insert(depths, hit and math.max(0, footY - hit.Position.Y) or math.huge)
+                                end
+                                table.sort(depths)
+                                if depths[2] > VOID_DEPTH then return math.huge end
+                                maxDrop = math.max(maxDrop, depths[2])
+                            end
+                            if maxDrop < 5 * BLOCK then return -1 end
+                            return math.floor(math.max(0, maxDrop - SAFE_DROP) * DAMAGE_PER_STUD + 0.5)
+                        end
+                
+                        module = category:CreateModule({
+                            Name = 'FallDamageHUD',
+                            Tooltip = 'Estimates fall damage in the next two blocks. Experimental damage formula.',
+                            Function = function(enabled)
+                                if not enabled or not module.Enabled then return end
+                                local playerGui = player:FindFirstChildOfClass('PlayerGui')
+                                if not playerGui then return end
+                                local existing = playerGui:FindFirstChild('ElianFallDamageHUD')
+                                if existing then existing:Destroy() end
+                                local screen = Instance.new('ScreenGui')
+                                screen.Name = 'ElianFallDamageHUD'
+                                screen.ResetOnSpawn = false
+                                screen.Parent = playerGui
+                                module:Clean(screen)
+                
+                                local label = Instance.new('TextLabel')
+                                label.AnchorPoint = Vector2.new(0.5, 1)
+                                label.Size = UDim2.fromOffset(166, 23)
+                                label.BackgroundColor3 = Color3.fromRGB(24, 26, 30)
+                                label.BackgroundTransparency = 0.12
+                                label.BorderSizePixel = 0
+                                label.TextColor3 = Color3.fromRGB(245, 245, 245)
+                                label.TextSize = 13
+                                label.Font = Enum.Font.GothamMedium
+                                label.Visible = false
+                                label.Parent = screen
+                                local corner = Instance.new('UICorner')
+                                corner.CornerRadius = UDim.new(0, 4)
+                                corner.Parent = label
+                
+                                local bar, elapsed, scanElapsed = nil, 0.1, 1
+                                local trackedCharacter, latestEstimate, frozenEstimate
+                                local falling, holdUntil = false, nil
+                                local LAND_HOLD = 1.5
+                                module:Clean(runService.Heartbeat:Connect(function(dt)
+                                    if not module.Enabled or not screen.Parent then return end
+                                    elapsed = elapsed + dt
+                                    scanElapsed = scanElapsed + dt
+                                    local character = player.Character
+                                    local humanoid = character and character:FindFirstChildOfClass('Humanoid')
+                                    local root = character and character:FindFirstChild('HumanoidRootPart')
+                                    if trackedCharacter ~= character or not humanoid or humanoid.Health <= 0 or not root then
+                                        trackedCharacter = character
+                                        latestEstimate, frozenEstimate = nil, nil
+                                        falling, holdUntil = false, nil
+                                        bar = nil
+                                        label.Visible = false
+                                        if not humanoid or humanoid.Health <= 0 or not root then return end
+                                    end
+                
+                                    -- Track transitions every frame, independently of the 10 Hz raycasts.
+                                    local now = os.clock()
+                                    local grounded = humanoid.FloorMaterial ~= Enum.Material.Air
+                                    if falling and grounded then
+                                        falling = false
+                                        holdUntil = now + LAND_HOLD
+                                    elseif not falling and not grounded and root.AssemblyLinearVelocity.Y < -0.5 then
+                                        falling = true
+                                        frozenEstimate = latestEstimate
+                                        holdUntil = nil
+                                    end
+                                    if not falling and holdUntil and now >= holdUntil then
+                                        holdUntil = nil
+                                        frozenEstimate = nil
+                                    end
+                
+                                    if elapsed < 0.1 then return end
+                                    elapsed = 0
+                                    if scanElapsed >= 1 then
+                                        scanElapsed = 0
+                                        bar = findHealthBar(playerGui, screen, humanoid)
+                                    end
+                                    if not bar or not bar.Parent or not visible(bar) then
+                                        label.Visible = false
+                                        return
+                                    end
+                                    local sourceGui = bar:FindFirstAncestorOfClass('ScreenGui')
+                                    if not sourceGui then label.Visible = false return end
+                                    screen.IgnoreGuiInset = sourceGui.IgnoreGuiInset
+                                    pcall(function() screen.ScreenInsets = sourceGui.ScreenInsets end)
+                                    screen.DisplayOrder = sourceGui.DisplayOrder + 1
+                
+                                    -- Keep a fresh estimate outside a fall, including during the landing hold.
+                                    -- During a fall, use the snapshot rather than the shrinking remaining distance.
+                                    if not falling or frozenEstimate == nil then
+                                        local ok, estimate = pcall(preview, character, root, humanoid)
+                                        if ok and estimate ~= nil then
+                                            latestEstimate = estimate
+                                            if falling and frozenEstimate == nil then frozenEstimate = estimate end
+                                        elseif not falling then
+                                            latestEstimate = nil
+                                        end
+                                    end
+                                    local damage
+                                    if falling or holdUntil then
+                                        damage = frozenEstimate
+                                    else
+                                        damage = latestEstimate
+                                    end
+                                    if damage == nil then
+                                        label.Visible = false
+                                        return
+                                    end
+                                    local pos, size = bar.AbsolutePosition, bar.AbsoluteSize
+                                    local base = screen.AbsolutePosition
+                                    label.Position = UDim2.fromOffset(
+                                        pos.X + size.X * 0.5 - base.X, pos.Y - base.Y - 4)
+                                    label.Text = damage == math.huge and 'Void'
+                                        or (damage == -1 and 'Safe')
+                                        or ('Est. fall damage: ' .. tostring(damage) .. ' HP')
+                                    label.Visible = true
+                                end))
+                            end
+                        })
+                    end
+                end
+            end)
+            if not ok then warn('[Elianware] FallDamageHUD registration: ' .. tostring(err)) end
         end
 
         pruneModules(vape.Modules)
@@ -291,7 +541,8 @@ local filterCode = [==[
                 warnings.BackgroundTransparency = 1
                 warnings.AnchorPoint = Vector2.new(1, 0)
                 warnings.Position = UDim2.new(1, -12, 0, 12)
-                warnings.Size = UDim2.fromOffset(242, 112)
+                warnings.Size = UDim2.fromOffset(340, 150)
+                warnings.AutomaticSize = Enum.AutomaticSize.Y
                 warnings.ZIndex = 100
                 warnings.Parent = click
 
@@ -300,63 +551,214 @@ local filterCode = [==[
                 layout.Padding = UDim.new(0, 5)
                 layout.Parent = warnings
 
+                local tweenService = game:GetService('TweenService')
+                local textService = game:GetService('TextService')
+                local cards = {}
+                local function animate(obj, duration, props)
+                    local tween = tweenService:Create(obj, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), props)
+                    tween:Play()
+                    return tween
+                end
+
                 local function createWarning(order, message)
+                    local accent = order == 1 and Color3.fromRGB(255, 104, 112) or Color3.fromRGB(255, 178, 100)
                     local box = Instance.new('Frame')
                     box.Name = 'Warning' .. order
                     box.LayoutOrder = order
-                    box.Size = UDim2.new(1, 0, 0, 46)
-                    box.BackgroundColor3 = Color3.fromRGB(117, 23, 30)
-                    box.BorderSizePixel = 0
+                    box.Size = UDim2.new(1, 0, 0, 100)
+                    box.BackgroundTransparency = 1
                     box.Visible = false
                     box.ZIndex = 101
                     box.Parent = warnings
+
+                    local card = Instance.new('CanvasGroup')
+                    card.Name = 'Notification'
+                    card.Size = UDim2.fromScale(1, 1)
+                    card.BackgroundColor3 = Color3.fromRGB(36, 38, 45)
+                    card.BackgroundTransparency = 0.06
+                    card.GroupTransparency = 1
+                    card.BorderSizePixel = 0
+                    card.ZIndex = 102
+                    card.Parent = box
                     local corner = Instance.new('UICorner')
-                    corner.CornerRadius = UDim.new(0, 6)
-                    corner.Parent = box
+                    corner.CornerRadius = UDim.new(0, 14)
+                    corner.Parent = card
                     local stroke = Instance.new('UIStroke')
-                    stroke.Color = Color3.fromRGB(235, 75, 84)
+                    stroke.Color = Color3.fromRGB(95, 95, 105)
+                    stroke.Transparency = 0.38
                     stroke.Thickness = 1
-                    stroke.Parent = box
-                    local label = Instance.new('TextLabel')
-                    label.BackgroundTransparency = 1
-                    label.Position = UDim2.fromOffset(9, 4)
-                    label.Size = UDim2.new(1, -37, 1, -8)
-                    label.Font = Enum.Font.GothamMedium
-                    label.TextSize = 12
-                    label.TextWrapped = true
-                    label.TextXAlignment = Enum.TextXAlignment.Left
-                    label.TextYAlignment = Enum.TextYAlignment.Center
-                    label.TextColor3 = Color3.fromRGB(255, 243, 243)
-                    label.Text = message
-                    label.ZIndex = 102
-                    label.Parent = box
+                    stroke.Parent = card
+                    local gradient = Instance.new('UIGradient')
+                    gradient.Rotation = 90
+                    gradient.Color = ColorSequence.new(Color3.fromRGB(255,255,255), Color3.fromRGB(218,218,225))
+                    gradient.Parent = card
+
+                    local function label(parent, text, x, y, w, h, size, color, font)
+                        local obj = Instance.new('TextLabel')
+                        obj.BackgroundTransparency = 1
+                        obj.Position = UDim2.fromOffset(x, y)
+                        obj.Size = UDim2.fromOffset(w, h)
+                        obj.Font = font or Enum.Font.GothamMedium
+                        obj.TextSize = size
+                        obj.TextColor3 = color
+                        obj.TextXAlignment = Enum.TextXAlignment.Left
+                        obj.TextYAlignment = Enum.TextYAlignment.Center
+                        obj.Text = text
+                        obj.ZIndex = 103
+                        obj.Parent = parent
+                        return obj
+                    end
+                    local icon = Instance.new('TextLabel')
+                    icon.Size = UDim2.fromOffset(34, 34)
+                    icon.Position = UDim2.fromOffset(12, 12)
+                    icon.BackgroundColor3 = accent:Lerp(Color3.fromRGB(28, 29, 35), 0.76)
+                    icon.TextColor3 = accent
+                    icon.Text = '!'
+                    icon.Font = Enum.Font.GothamBold
+                    icon.TextSize = 23
+                    icon.BorderSizePixel = 0
+                    icon.ZIndex = 103
+                    icon.Parent = card
+                    local iconCorner = Instance.new('UICorner')
+                    iconCorner.CornerRadius = UDim.new(0, 10)
+                    iconCorner.Parent = icon
+                    label(card, order == 1 and 'Configuration warning' or 'Recording warning',
+                        56, 10, 240, 20, 14, Color3.fromRGB(250,250,252), Enum.Font.GothamBold)
+                    label(card, 'Elianware  ·  Risk alert', 56, 30, 240, 15, 10, Color3.fromRGB(166,169,180))
+                    local body = label(card, message .. '.', 12, 53, 316, 34, 12, Color3.fromRGB(235,235,240))
+                    body.TextWrapped = true
+                    body.TextYAlignment = Enum.TextYAlignment.Top
+
                     local close = Instance.new('TextButton')
                     close.Name = 'Dismiss'
-                    close.BackgroundTransparency = 1
-                    close.AnchorPoint = Vector2.new(1, 0)
-                    close.Position = UDim2.new(1, -5, 0, 4)
-                    close.Size = UDim2.fromOffset(22, 22)
-                    close.Font = Enum.Font.GothamBold
-                    close.TextSize = 16
-                    close.TextColor3 = Color3.fromRGB(255, 220, 220)
-                    close.Text = 'X'
-                    close.ZIndex = 103
-                    close.Parent = box
+                    close.BackgroundColor3 = Color3.fromRGB(79,81,90)
+                    close.BackgroundTransparency = 0.65
+                    close.Position = UDim2.new(1, -34, 0, 10)
+                    close.Size = UDim2.fromOffset(24, 24)
+                    close.Font = Enum.Font.GothamMedium
+                    close.TextSize = 17
+                    close.TextColor3 = Color3.fromRGB(212,214,222)
+                    close.Text = '×'
+                    close.AutoButtonColor = false
+                    close.ZIndex = 104
+                    close.Parent = card
+                    local closeCorner = Instance.new('UICorner')
+                    closeCorner.CornerRadius = UDim.new(1,0)
+                    closeCorner.Parent = close
+                    close.MouseEnter:Connect(function() animate(close, 0.12, {BackgroundTransparency = 0.2}) end)
+                    close.MouseLeave:Connect(function() animate(close, 0.12, {BackgroundTransparency = 0.65}) end)
+                    local line = Instance.new('Frame')
+                    line.BackgroundColor3 = accent
+                    line.BackgroundTransparency = 0.15
+                    line.BorderSizePixel = 0
+                    line.Position = UDim2.new(0,12,1,-5)
+                    line.Size = UDim2.new(1,-24,0,2)
+                    line.ZIndex = 103
+                    line.Parent = card
+                    local lineCorner = Instance.new('UICorner')
+                    lineCorner.CornerRadius = UDim.new(1,0)
+                    lineCorner.Parent = line
+                    cards[box] = {card = card, icon = icon, accent = accent, body = body, pills = {}, names = nil, wanted = false, generation = 0, height = 100}
                     return box, close
                 end
 
-                local banBox, banClose = createWarning(1, 'you can get banned for this')
-                local clipBox, clipClose = createWarning(2, 'if you clip this, you will get banned')
+                local function pulse(state)
+                    state.pulse = (state.pulse or 0) + 1
+                    local id = state.pulse
+                    task.spawn(function()
+                        for _ = 1, 2 do
+                            if not state.wanted or state.pulse ~= id then break end
+                            animate(state.icon, 0.18, {BackgroundColor3 = state.accent:Lerp(Color3.fromRGB(28,29,35),0.35)})
+                            task.wait(0.18)
+                            if not state.wanted or state.pulse ~= id then break end
+                            animate(state.icon, 0.22, {BackgroundColor3 = state.accent:Lerp(Color3.fromRGB(28,29,35),0.76)})
+                            task.wait(0.22)
+                        end
+                    end)
+                end
+                local function setNames(box, names)
+                    local state = cards[box]
+                    if state.names == names then return end
+                    state.names = names
+                    local keep, ordered = {}, {}
+                    for name in string.gmatch(names, '[^,]+') do
+                        name = name:match('^%s*(.-)%s*$')
+                        if name ~= '' then keep[name] = true; table.insert(ordered, name) end
+                    end
+                    for name, pill in pairs(state.pills) do
+                        if not keep[name] then
+                            state.pills[name] = nil
+                            animate(pill, 0.16, {TextTransparency = 1, BackgroundTransparency = 1, Size = UDim2.fromOffset(0,22)})
+                            task.delay(0.17, function() pill:Destroy() end)
+                        end
+                    end
+                    local bodyHeight = math.max(16, textService:GetTextSize(state.body.Text,12,state.body.Font,Vector2.new(316,1000)).Y)
+                    state.body.Size = UDim2.fromOffset(316,bodyHeight)
+                    local x, y = 12, 53 + bodyHeight + 7
+                    local added = false
+                    for _, name in ipairs(ordered) do
+                        local width = math.min(316, math.ceil(textService:GetTextSize(name,11,Enum.Font.GothamMedium,Vector2.new(300,1000)).X)+18)
+                        if x + width > 328 then x = 12; y = y + 27 end
+                        local pill = state.pills[name]
+                        if not pill then
+                            added = true
+                            pill = Instance.new('TextLabel')
+                            pill.BackgroundColor3 = state.accent:Lerp(Color3.fromRGB(36,38,45),0.82)
+                            pill.BorderSizePixel = 0
+                            pill.Font = Enum.Font.GothamMedium
+                            pill.TextSize = 11
+                            pill.TextColor3 = state.accent:Lerp(Color3.new(1,1,1),0.25)
+                            pill.Text = name
+                            pill.TextTruncate = Enum.TextTruncate.AtEnd
+                            pill.ZIndex = 104
+                            pill.Position = UDim2.fromOffset(x,y)
+                            pill.Size = UDim2.fromOffset(0,22)
+                            pill.TextTransparency = 1
+                            pill.BackgroundTransparency = 1
+                            pill.Parent = state.card
+                            local rounding = Instance.new('UICorner')
+                            rounding.CornerRadius = UDim.new(0,7)
+                            rounding.Parent = pill
+                            state.pills[name] = pill
+                        end
+                        animate(pill,0.18,{Position = UDim2.fromOffset(x,y), Size = UDim2.fromOffset(width,22), TextTransparency = 0, BackgroundTransparency = 0})
+                        x = x + width + 5
+                    end
+                    state.height = math.max(86, y + (#ordered > 0 and 22 or 0) + 12)
+                    animate(box,0.22,{Size = UDim2.new(1,0,0,state.height)})
+                    if added and state.wanted then pulse(state) end
+                end
+                local function showWarning(box, wanted)
+                    local state = cards[box]
+                    if state.wanted == wanted then return end
+                    state.wanted = wanted
+                    state.generation = state.generation + 1
+                    local id = state.generation
+                    if wanted then
+                        box.Visible = true
+                        state.card.Position = UDim2.fromOffset(20, 0)
+                        state.card.GroupTransparency = 1
+                        animate(state.card, 0.25, {Position = UDim2.fromOffset(0,0), GroupTransparency = 0})
+                        pulse(state)
+                    else
+                        animate(state.card, 0.2, {Position = UDim2.fromOffset(20,0), GroupTransparency = 1})
+                        task.delay(0.21,function()
+                            if state.generation == id and box.Parent then box.Visible = false end
+                        end)
+                    end
+                end
+
+                local banBox, banClose = createWarning(1, 'This setting might get you banned')
+                local clipBox, clipClose = createWarning(2, 'These modules may be visible in recordings')
                 local dismissed = {ban = false, clip = false}
                 local priorSignature
-
                 banClose.MouseButton1Click:Connect(function()
                     dismissed.ban = true
-                    banBox.Visible = false
+                    showWarning(banBox, false)
                 end)
                 clipClose.MouseButton1Click:Connect(function()
                     dismissed.clip = true
-                    clipBox.Visible = false
+                    showWarning(clipBox, false)
                 end)
 
                 local function normalize(value)
@@ -413,47 +815,65 @@ local filterCode = [==[
                     local mode = selectedOption(silent, 'Mode', 'Target Mode', 'Targeting Mode') or ''
                     local distanceMode = normalize(mode):find('distance', 1, true) ~= nil
 
-                    local ban = (h ~= nil and h > 25 and r ~= nil and r > 13.5 and ping ~= nil and ping < 120)
-                        or (r ~= nil and r > 15)
-                        or (airPct ~= nil and airPct > 85)
-                        or (fov ~= nil and (fov > 85 or (fov > 40 and not distanceMode)))
+                    -- Attribute existing warning rules without changing their thresholds.
+                    local risky, rendered = {}, {}
+                    local seen = {}
+                    local function addRisk(name)
+                        if not seen[name] then seen[name] = true; table.insert(risky, name) end
+                    end
+                    if h ~= nil and h > 25 and r ~= nil and r > 13.5 and ping ~= nil and ping < 120 then
+                        addRisk('HitBoxes')
+                        addRisk('Reach')
+                    end
+                    if r ~= nil and r > 15 then addRisk('Reach') end
+                    if airPct ~= nil and airPct > 85 then addRisk('AirReach') end
+                    if fov ~= nil and (fov > 85 or (fov > 40 and not distanceMode)) then addRisk('SilentAim') end
+                    local legitMine = getModule('LegitMine') or getModule('PhaseMine')
+                    if legitMine and legitMine.Enabled then addRisk('LegitMine') end
+                    local ban = #risky > 0
 
-                    local render = false
                     local renderNames = {
                         ESP = true, KitESP = true, KitRender = true, NameTags = true,
                         BedPlates = true
                     }
+                    local renderSeen = {}
                     for _, modules in ipairs({vape.Modules or {}, (vape.Legit and vape.Legit.Modules) or {}}) do
                         for name, module in pairs(modules) do
                             if type(module) == 'table' and module.Enabled then
                                 local category = module.Category
                                 local categoryName = type(category) == 'table' and category.Name or category
-                                if renderNames[name] or categoryName == 'Render' then
-                                    render = true
-                                    break
+                                if (renderNames[name] or categoryName == 'Render') and not renderSeen[name] then
+                                    renderSeen[name] = true
+                                    table.insert(rendered, tostring(name))
                                 end
                             end
                         end
-                        if render then break end
                     end
+                    table.sort(risky)
+                    table.sort(rendered)
+                    local render = #rendered > 0
+                    local riskText = table.concat(risky, ', ')
+                    local renderText = table.concat(rendered, ', ')
                     return ban, render, table.concat({
                         tostring(reach and reach.Enabled), tostring(r), tostring(hitboxes and hitboxes.Enabled),
                         tostring(h), tostring(ping ~= nil and ping < 130), tostring(ping ~= nil and ping > 200), tostring(airPct),
-                        tostring(silent and silent.Enabled), tostring(fov), mode, tostring(render)
-                    }, '|')
+                        tostring(silent and silent.Enabled), tostring(fov), mode, riskText, renderText
+                    }, '|'), riskText, renderText
                 end
 
                 task.spawn(function()
                     while click.Parent and gui.Parent do
-                        local ok, ban, clip, signature = pcall(check)
+                        local ok, ban, clip, signature, riskText, renderText = pcall(check)
                         if ok then
                             if signature ~= priorSignature then
                                 priorSignature = signature
                                 dismissed.ban = false
                                 dismissed.clip = false
                             end
-                            banBox.Visible = ban and not dismissed.ban
-                            clipBox.Visible = clip and not dismissed.clip
+                            setNames(banBox, riskText)
+                            setNames(clipBox, renderText)
+                            showWarning(banBox, ban and not dismissed.ban)
+                            showWarning(clipBox, clip and not dismissed.clip)
                         end
                         task.wait(0.25)
                     end
@@ -627,6 +1047,10 @@ customGUI = replaceOnce(customGUI,
     "mainapi.Categories.Main:CreateDivider('misc')",
     "if game.GameId == 2619619496 then\n    mainapi:CreateCategory({\n        Name = 'Experimental (Ban)',\n        Icon = getcustomasset('aerov4/assets/new/blatanticon.png'),\n        Size = UDim2.fromOffset(14, 14)\n    })\n    local experimental = mainapi.Categories['Experimental (Ban)']\n    if experimental and experimental.Object then\n        experimental.Object.Position = UDim2.fromOffset(466, 120)\n        if experimental.Button and experimental.Button.Object then\n            experimental.Button.Object.Visible = true\n        end\n    end\nend\nmainapi.Categories.Main:CreateDivider('misc')",
     'experimental category')
+customGUI = replaceOnce(customGUI,
+    "mainapi.Categories.Main:CreateDivider('misc')",
+    "if game.GameId == 2619619496 then\n    mainapi:CreateCategory({Name = 'Debug', Icon = getcustomasset('aerov4/assets/new/blatanticon.png'), Size = UDim2.fromOffset(14, 14)})\n    local debugCategory = mainapi.Categories.Debug\n    if debugCategory and debugCategory.Object then debugCategory.Object.Position = UDim2.fromOffset(686, 120) end\nend\nmainapi.Categories.Main:CreateDivider('misc')",
+    'debug category')
 writefile('aerov4/guis/new.lua', customGUI)
 -- Preserve the upstream AeroV4 implementations of Freecam and FOV.
 -- Freecam's original registration is in World; move only that module to Legit.
@@ -752,6 +1176,370 @@ if gameFileId == 6872274481 then
     bedwarsSource = capSlider(bedwarsSource, 'Mine = Reach:CreateSlider({', 16)
     bedwarsSource = capSlider(bedwarsSource, 'FOV = SilentAim:CreateSlider({', 100)
     bedwarsSource = patchHitFix(bedwarsSource)
+    -- Keep the original AeroV4 PhaseMine implementation unchanged; show it in Experimental.
+    bedwarsSource = replaceOnce(bedwarsSource,
+        'PhaseMine = vape.Categories.World:CreateModule({',
+        "PhaseMine = vape.Categories['Experimental (Ban)']:CreateModule({",
+        'original PhaseMine experimental category')
+
+    -- Pause only with a wood-to-diamond axe or pickaxe equipped and a check triggered.
+    -- Adjust only the PhaseMine block, not other BedWars modules.
+    local phaseStart = "run(function()\n\tlocal PhaseMine\n"
+    local phaseEnd = "Tooltip = 'mine OR build through players and npcs'\n\t})\nend)"
+    local first = bedwarsSource:find(phaseStart, 1, true)
+    local finish = first and bedwarsSource:find(phaseEnd, first, true)
+    if not first or not finish then
+        error('[AeroV4 Lite] PhaseMine module boundaries not found')
+    end
+    finish = finish + #phaseEnd - 1
+    local phaseSource = bedwarsSource:sub(first, finish)
+    local function phaseReplace(before, after, name)
+        local start = phaseSource:find(before, 1, true)
+        if not start or phaseSource:find(before, start + #before, true) then
+            error('[AeroV4 Lite] Unexpected PhaseMine patch marker: ' .. name)
+        end
+        phaseSource = phaseSource:sub(1, start - 1) .. after .. phaseSource:sub(start + #before)
+    end
+    phaseReplace("local tracked = {}\n\tlocal descConnections = {}",
+        [==[local tracked = {}
+    local descConnections = {}
+    local paused = false
+    local pauseGeneration = 0
+    local EntityLimitSlider
+    local function maxFrontEntities()
+        return EntityLimitSlider and EntityLimitSlider.Value or 3
+    end
+    local CURSOR_RADIUS_PIXELS = 45
+    local TreeCheck, HephCheck
+
+    local function hasMiningToolEquipped()
+        -- AeroV4's BedWars inventory wrapper returns the currently held item
+        -- as inventory.hand.itemType, without relying on Roblox Tool instances.
+        local inventory = bedwars.getInventory and bedwars.getInventory(lplr)
+        local hand = inventory and inventory.hand
+        local itemType = hand and hand.itemType
+        if type(itemType) ~= 'string' then return false end
+        return ({
+            wood_pickaxe = true, stone_pickaxe = true,
+            iron_pickaxe = true, diamond_pickaxe = true,
+            wood_axe = true, stone_axe = true,
+            iron_axe = true, diamond_axe = true
+        })[itemType:lower()] == true
+    end
+
+    local function matchesCheckedKit(model)
+        local player = game:GetService('Players'):GetPlayerFromCharacter(model)
+        if not player then return false end
+        -- AeroV4 reads PlayingAsKits and tokenizes it for multiple active kits.
+        local kits = player:GetAttribute('PlayingAsKits')
+        if type(kits) ~= 'string' then return false end
+        for kit in kits:lower():gmatch('[%w_]+') do
+            if TreeCheck and TreeCheck.Enabled
+                and (kit == 'bigman' or kit == 'eldertree' or kit == 'elder_tree') then
+                return true
+            end
+            if HephCheck and HephCheck.Enabled
+                and (kit == 'tinker' or kit == 'hephaestus') then
+                return true
+            end
+        end
+        return false
+    end
+
+    local function countFrontEntities()
+        local character = lplr.Character
+        local root = character and character:FindFirstChild('HumanoidRootPart')
+        local camera = workspace.CurrentCamera
+        if not root or not camera then return 0 end
+        local counted = {}
+        local count = 0
+        local function checkCharacter(model)
+            if not model or model == character or counted[model] or not model.Parent then return end
+            counted[model] = true
+            local humanoid = model:FindFirstChildOfClass('Humanoid')
+            local targetRoot = model:FindFirstChild('HumanoidRootPart') or model.PrimaryPart
+            if not humanoid or humanoid.Health <= 0 or not targetRoot then return end
+            local point, visible = camera:WorldToViewportPoint(targetRoot.Position)
+            if not visible or point.Z <= 0 then return end
+            local inset = game:GetService('GuiService'):GetGuiInset()
+            local cursor = game:GetService('UserInputService'):GetMouseLocation() - inset
+            if (Vector2.new(point.X, point.Y) - cursor).Magnitude <= CURSOR_RADIUS_PIXELS then
+                if matchesCheckedKit(model) then
+                    count = maxFrontEntities() + 1
+                else
+                    count = count + 1
+                end
+            end
+        end
+        for _, entity in ipairs(entitylib.List) do
+            checkCharacter(entity.Character)
+            if count > maxFrontEntities() then return count end
+        end
+        for _, model in ipairs(workspace:GetChildren()) do
+            if model:IsA('Model') then checkCharacter(model) end
+            if count > maxFrontEntities() then return count end
+        end
+        return count
+    end
+
+    local function setPaused(value)
+        if paused == value then return end
+        paused = value
+        for _, parts in pairs(tracked) do
+            for part in pairs(parts) do
+                if part.Parent then
+                    pcall(function()
+                        bedwars.QueryUtil:setQueryIgnored(part, not paused)
+                    end)
+                end
+            end
+        end
+    end]==],
+        'pause state and front entity detection')
+    phaseReplace("local function ignorePart(part)\n\t\t\t\t\tpcall(function()",
+        "local function ignorePart(part)\n                    if paused then return end\n\t\t\t\t\tpcall(function()",
+        'prevent query ignores while paused')
+    phaseReplace("if callback then\n\n\t\t\t\tlocal function ignorePart",
+        "if callback then\n                pauseGeneration = pauseGeneration + 1\n                local generation = pauseGeneration\n                paused = false\n                setPaused(hasMiningToolEquipped() and countFrontEntities() > maxFrontEntities())\n\n\t\t\t\tlocal function ignorePart",
+        'enable state setup')
+    phaseReplace("setupAllCharacters()\n\t\t\t\tupdateCollision()\n",
+        [==[setupAllCharacters()
+                updateCollision()
+                task.spawn(function()
+                    while PhaseMine.Enabled and pauseGeneration == generation do
+                        setPaused(hasMiningToolEquipped() and countFrontEntities() > maxFrontEntities())
+                        task.wait(0.15)
+                    end
+                end)
+]==],
+        'independent pause monitor')
+    phaseReplace("\t\t\telse\n\t\t\t\tfor _, conn in ipairs(connections) do",
+        "\t\t\telse\n                pauseGeneration = pauseGeneration + 1\n                setPaused(false)\n\t\t\t\tfor _, conn in ipairs(connections) do",
+        'stop monitor and restore on disable')
+    -- Cursor-centered FOV checks use a 45-pixel radius in third person.
+    -- Screen-space FOV uses WorldToViewportPoint and the mouse's viewport position.
+    -- No stud-distance limit; entities and kits share the cursor FOV.
+    phaseReplace("Tooltip = 'mine OR build through players and npcs'\n\t})\nend)",
+        [==[Tooltip = 'mine OR build through players and npcs'
+    })
+    EntityLimitSlider = PhaseMine:CreateSlider({
+        Name = 'Entity Limit',
+        Min = 1,
+        Max = 5,
+        Default = 3,
+        Tooltip = 'how many things infront before it doesnt phasemine'
+    })
+    TreeCheck = PhaseMine:CreateToggle({
+        Name = 'TreeCheck',
+        Default = false,
+        Tooltip = 'checks if there is a big tree blocking'
+    })
+    HephCheck = PhaseMine:CreateToggle({
+        Name = 'HephCheck',
+        Default = false,
+        Tooltip = 'checks if theres a fat heph blocking'
+    })
+end)]==],
+        'PhaseMine settings slider')
+    phaseReplace("Name = 'PhaseMine',", "Name = 'LegitMine',", 'display name')
+    phaseReplace("    HephCheck = PhaseMine:CreateToggle({\n        Name = 'HephCheck',\n        Default = false,\n        Tooltip = 'checks if theres a fat heph blocking'\n    })", [==[    HephCheck = PhaseMine:CreateToggle({
+        Name = 'HephCheck',
+        Default = false,
+        Tooltip = 'checks if theres a fat heph blocking'
+    })
+    vape.ModuleAliases = vape.ModuleAliases or {}
+    vape.ModuleAliases.LegitMine = {'PhaseMine'}]==], 'search alias')
+    bedwarsSource = bedwarsSource:sub(1, first - 1) .. phaseSource .. bedwarsSource:sub(finish + 1)
+end
+-- Read-only local diagnostics. No remotes, combat hooks or damage modification.
+if gameFileId == 6872274481 then
+    bedwarsSource = [==[
+do
+    local api = shared.vape
+    local category = api and api.Categories.Debug
+    if category then
+        local player = game:GetService('Players').LocalPlayer
+        local runService = game:GetService('RunService')
+        local input = game:GetService('UserInputService')
+        local positions = {}
+        local W, H, N = 216, 122, 48
+        local function register(name, title, units, slot, period, sample, eventMode, tooltip)
+            local module
+            module = category:CreateModule({
+                Name = name,
+                Tooltip = tooltip,
+                Function = function(enabled)
+                    if not enabled or not module.Enabled then return end
+                    local pg = player:FindFirstChildOfClass('PlayerGui')
+                    if not pg then return end
+                    local screen = Instance.new('ScreenGui')
+                    screen.Name = 'ElianDebug' .. name
+                    screen.ResetOnSpawn = false
+                    screen.DisplayOrder = 15
+                    screen.Parent = pg
+                    module:Clean(screen)
+                    local frame = Instance.new('Frame')
+                    frame.Size = UDim2.fromOffset(W, H)
+                    frame.BackgroundColor3 = Color3.fromRGB(23, 27, 36)
+                    frame.BackgroundTransparency = 0.08
+                    frame.BorderSizePixel = 0
+                    frame.Parent = screen
+                    local round = Instance.new('UICorner')
+                    round.CornerRadius = UDim.new(0, 6)
+                    round.Parent = frame
+                    local function place(x, y)
+                        local camera = workspace.CurrentCamera
+                        local view = camera and camera.ViewportSize or Vector2.new(800, 600)
+                        x = math.clamp(x, 0, math.max(0, view.X - W))
+                        y = math.clamp(y, 0, math.max(0, view.Y - H - 36))
+                        frame.Position = UDim2.fromOffset(x, y)
+                        positions[name] = Vector2.new(x, y)
+                    end
+                    local view = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800,600)
+                    local saved = positions[name]
+                    place(saved and saved.X or view.X - W - 12 - math.floor((slot-1)/3)*(W+8),
+                          saved and saved.Y or 65 + ((slot-1)%3)*(H+8))
+                    local function textLabel(parent, text, x, y, w, h, size)
+                        local label = Instance.new('TextLabel')
+                        label.BackgroundTransparency = 1
+                        label.Position = UDim2.fromOffset(x,y)
+                        label.Size = UDim2.fromOffset(w,h)
+                        label.Font = Enum.Font.Gotham
+                        label.TextSize = size
+                        label.TextColor3 = Color3.fromRGB(225,232,245)
+                        label.TextXAlignment = Enum.TextXAlignment.Left
+                        label.Text = text
+                        label.Parent = parent
+                        return label
+                    end
+                    local header = textLabel(frame,title,8,0,W-16,23,12)
+                    header.Active = true
+                    local readout = textLabel(frame,'Waiting for data',8,79,W-16,19,11)
+                    local spikeReadout = textLabel(frame,'Last spike: --',8,98,W-16,19,11)
+                    spikeReadout.TextColor3 = Color3.fromRGB(245,185,91)
+                    local plot = Instance.new('Frame')
+                    plot.Position = UDim2.fromOffset(8,24)
+                    plot.Size = UDim2.fromOffset(W-16,54)
+                    plot.BackgroundColor3 = Color3.fromRGB(14,18,25)
+                    plot.BorderSizePixel = 0
+                    plot.ClipsDescendants = true
+                    plot.Parent = frame
+                    local bars, values, recent = {}, {}, {}
+                    local lastValue, lastSpike, lastSpikeAt
+                    local function average(now)
+                        while recent[1] and now - recent[1].at > 5 do table.remove(recent,1) end
+                        if #recent == 0 then return nil end
+                        local sum = 0
+                        for _, v in ipairs(recent) do sum = sum + v.value end
+                        return sum / #recent
+                    end
+                    local function refresh(now)
+                        local avg = average(now)
+                        readout.Text = lastValue ~= nil and string.format('Now %.1f | 5s avg %s %s', lastValue, avg and string.format('%.1f',avg) or '--',units) or 'Waiting for data'
+                        spikeReadout.Text = lastSpikeAt and string.format('Spike %.1f %s | %.1fs ago',lastSpike,units,now-lastSpikeAt) or 'Last spike: --'
+                    end
+                    for i = 1,N do
+                        local bar = Instance.new('Frame')
+                        bar.AnchorPoint = Vector2.new(0,1)
+                        bar.BorderSizePixel = 0
+                        bar.BackgroundColor3 = Color3.fromRGB(52,162,245)
+                        bar.Visible = false
+                        bar.Parent = plot
+                        bars[i] = bar
+                    end
+                    local function push(value)
+                        if type(value) ~= 'number' or value ~= value or value == math.huge or value < 0 then return end
+                        local now = os.clock()
+                        local baseline = average(now)
+                        local minimum = ({CombatPing = 10, HitDelayGraph = 30, FrameTimeGraph = 2, DamageTakenGraph = 3, MovementSpeedGraph = 2})[name] or 1
+                        local spike = baseline ~= nil and #recent >= 3 and value > baseline * 1.5 and value - baseline >= minimum
+                        if spike then lastSpike, lastSpikeAt = value, now end
+                        lastValue = value
+                        recent[#recent+1] = {at = now, value = value}
+                        values[#values+1] = {value = value, spike = spike}
+                        if #values > N then table.remove(values,1) end
+                        local max = 1
+                        for _, v in ipairs(values) do max = math.max(max,v.value) end
+                        local step = (W-16)/N
+                        for i, bar in ipairs(bars) do
+                            local v = values[i - (N-#values)]
+                            bar.Visible = v ~= nil
+                            if v then
+                                bar.Position = UDim2.fromOffset((i-1)*step,54)
+                                bar.Size = UDim2.fromOffset(math.max(1,step-1),math.max(1, v.value/max*53))
+                                bar.BackgroundColor3 = v.spike and Color3.fromRGB(245,185,91) or Color3.fromRGB(52,162,245)
+                            end
+                        end
+                        refresh(now)
+                    end
+                    local drag, start, from
+                    module:Clean(header.InputBegan:Connect(function(obj)
+                        if obj.UserInputType == Enum.UserInputType.MouseButton1 or obj.UserInputType == Enum.UserInputType.Touch then
+                            drag, start, from = obj, obj.Position, frame.AbsolutePosition
+                            from = Vector2.new(frame.Position.X.Offset,frame.Position.Y.Offset)
+                        end
+                    end))
+                    module:Clean(input.InputChanged:Connect(function(obj)
+                        if not drag then return end
+                        if obj == drag or (drag.UserInputType == Enum.UserInputType.MouseButton1 and obj.UserInputType == Enum.UserInputType.MouseMovement) then
+                            local delta = obj.Position-start
+                            place(from.X+delta.X,from.Y+delta.Y)
+                        end
+                    end))
+                    module:Clean(input.InputEnded:Connect(function(obj)
+                        if obj == drag then drag = nil end
+                    end))
+                    local elapsed, frames, previous, previousAt, tracked, healthConn = 0,0,nil,nil,nil,nil
+                    local refreshElapsed = 0
+                    module:Clean(function() if healthConn then healthConn:Disconnect() end end)
+                    module:Clean(runService.Heartbeat:Connect(function(dt)
+                        if not module.Enabled then return end
+                        refreshElapsed = refreshElapsed + dt
+                        if refreshElapsed >= 0.25 then refreshElapsed = 0; refresh(os.clock()) end
+                        local char = player.Character
+                        local hum = char and char:FindFirstChildOfClass('Humanoid')
+                        if eventMode and hum ~= tracked then
+                            if healthConn then healthConn:Disconnect(); healthConn = nil end
+                            tracked, previousAt = hum,nil
+                            previous = hum and hum.Health
+                            if hum then
+                                healthConn = hum.HealthChanged:Connect(function(hp)
+                                    local old = previous
+                                    previous = hp
+                                    if not old or hp >= old then return end
+                                    local now = os.clock()
+                                    if eventMode == 'interval' then
+                                        if previousAt and now-previousAt <= 10 then push((now-previousAt)*1000) end
+                                        previousAt = now
+                                    else push(old-hp) end
+                                end)
+                            end
+                        end
+                        if eventMode then return end
+                        elapsed,frames = elapsed+dt,frames+1
+                        if elapsed < period then return end
+                        local ok,value = pcall(sample,elapsed,frames,char,hum)
+                        elapsed,frames = 0,0
+                        if ok and value ~= nil then push(value) end
+                    end))
+                end
+            })
+        end
+        register('CombatPing','Combat ping','ms',1,0.25,function()
+            local item = game:GetService('Stats').Network.ServerStatsItem:FindFirstChild('Data Ping')
+            return item and item:GetValue() or player:GetNetworkPing()*1000
+        end,nil,'Live connection latency; sampled continuously, not just in combat.')
+        register('HitDelayGraph','Incoming hit delay','ms',2,0,nil,'interval',
+            'Intervals between local health losses, not confirmed outgoing hits. Resets interval after 10 seconds.')
+        register('FrameTimeGraph','Frame time','ms',3,0.25,function(dt,frames) return dt/frames*1000 end,nil,'Average client frame duration.')
+        register('DamageTakenGraph','Damage taken','HP',4,0,nil,'damage','Local health decreases, including environmental damage.')
+        register('MovementSpeedGraph','Movement speed','stud/s',5,0.15,function(_,_,char)
+            local root = char and char:FindFirstChild('HumanoidRootPart')
+            if root then local v = root.AssemblyLinearVelocity; return Vector3.new(v.X,0,v.Z).Magnitude end
+        end,nil,'Local horizontal movement speed.')
+    end
+end
+]==] .. '\n' .. bedwarsSource
 end
 writefile('aerov4/games/' .. tostring(gameFileId) .. '.lua', bedwarsSource)
 
