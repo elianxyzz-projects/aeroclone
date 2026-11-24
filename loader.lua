@@ -208,7 +208,6 @@ local filterCode = [==[
             AutoTool = true,
             Freecam = true,
             FOV = true,
-            LegitMine = true,
             FallDamageHUD = true,
             CombatPing = true,
             HitDelayGraph = true,
@@ -828,8 +827,6 @@ local filterCode = [==[
                     if r ~= nil and r > 15 then addRisk('Reach') end
                     if airPct ~= nil and airPct > 85 then addRisk('AirReach') end
                     if fov ~= nil and (fov > 85 or (fov > 40 and not distanceMode)) then addRisk('SilentAim') end
-                    local legitMine = getModule('LegitMine') or getModule('PhaseMine')
-                    if legitMine and legitMine.Enabled then addRisk('LegitMine') end
                     local ban = #risky > 0
 
                     local renderNames = {
@@ -1176,180 +1173,6 @@ if gameFileId == 6872274481 then
     bedwarsSource = capSlider(bedwarsSource, 'Mine = Reach:CreateSlider({', 16)
     bedwarsSource = capSlider(bedwarsSource, 'FOV = SilentAim:CreateSlider({', 100)
     bedwarsSource = patchHitFix(bedwarsSource)
-    -- Keep the original AeroV4 PhaseMine implementation unchanged; show it in Experimental.
-    bedwarsSource = replaceOnce(bedwarsSource,
-        'PhaseMine = vape.Categories.World:CreateModule({',
-        "PhaseMine = vape.Categories['Experimental (Ban)']:CreateModule({",
-        'original PhaseMine experimental category')
-
-    -- Pause only with a wood-to-diamond axe or pickaxe equipped and a check triggered.
-    -- Adjust only the PhaseMine block, not other BedWars modules.
-    local phaseStart = "run(function()\n\tlocal PhaseMine\n"
-    local phaseEnd = "Tooltip = 'mine OR build through players and npcs'\n\t})\nend)"
-    local first = bedwarsSource:find(phaseStart, 1, true)
-    local finish = first and bedwarsSource:find(phaseEnd, first, true)
-    if not first or not finish then
-        error('[AeroV4 Lite] PhaseMine module boundaries not found')
-    end
-    finish = finish + #phaseEnd - 1
-    local phaseSource = bedwarsSource:sub(first, finish)
-    local function phaseReplace(before, after, name)
-        local start = phaseSource:find(before, 1, true)
-        if not start or phaseSource:find(before, start + #before, true) then
-            error('[AeroV4 Lite] Unexpected PhaseMine patch marker: ' .. name)
-        end
-        phaseSource = phaseSource:sub(1, start - 1) .. after .. phaseSource:sub(start + #before)
-    end
-    phaseReplace("local tracked = {}\n\tlocal descConnections = {}",
-        [==[local tracked = {}
-    local descConnections = {}
-    local paused = false
-    local pauseGeneration = 0
-    local EntityLimitSlider
-    local function maxFrontEntities()
-        return EntityLimitSlider and EntityLimitSlider.Value or 3
-    end
-    local CURSOR_RADIUS_PIXELS = 45
-    local TreeCheck, HephCheck
-
-    local function hasMiningToolEquipped()
-        -- AeroV4's BedWars inventory wrapper returns the currently held item
-        -- as inventory.hand.itemType, without relying on Roblox Tool instances.
-        local inventory = bedwars.getInventory and bedwars.getInventory(lplr)
-        local hand = inventory and inventory.hand
-        local itemType = hand and hand.itemType
-        if type(itemType) ~= 'string' then return false end
-        return ({
-            wood_pickaxe = true, stone_pickaxe = true,
-            iron_pickaxe = true, diamond_pickaxe = true,
-            wood_axe = true, stone_axe = true,
-            iron_axe = true, diamond_axe = true
-        })[itemType:lower()] == true
-    end
-
-    local function matchesCheckedKit(model)
-        local player = game:GetService('Players'):GetPlayerFromCharacter(model)
-        if not player then return false end
-        -- AeroV4 reads PlayingAsKits and tokenizes it for multiple active kits.
-        local kits = player:GetAttribute('PlayingAsKits')
-        if type(kits) ~= 'string' then return false end
-        for kit in kits:lower():gmatch('[%w_]+') do
-            if TreeCheck and TreeCheck.Enabled
-                and (kit == 'bigman' or kit == 'eldertree' or kit == 'elder_tree') then
-                return true
-            end
-            if HephCheck and HephCheck.Enabled
-                and (kit == 'tinker' or kit == 'hephaestus') then
-                return true
-            end
-        end
-        return false
-    end
-
-    local function countFrontEntities()
-        local character = lplr.Character
-        local root = character and character:FindFirstChild('HumanoidRootPart')
-        local camera = workspace.CurrentCamera
-        if not root or not camera then return 0 end
-        local counted = {}
-        local count = 0
-        local function checkCharacter(model)
-            if not model or model == character or counted[model] or not model.Parent then return end
-            counted[model] = true
-            local humanoid = model:FindFirstChildOfClass('Humanoid')
-            local targetRoot = model:FindFirstChild('HumanoidRootPart') or model.PrimaryPart
-            if not humanoid or humanoid.Health <= 0 or not targetRoot then return end
-            local point, visible = camera:WorldToViewportPoint(targetRoot.Position)
-            if not visible or point.Z <= 0 then return end
-            local inset = game:GetService('GuiService'):GetGuiInset()
-            local cursor = game:GetService('UserInputService'):GetMouseLocation() - inset
-            if (Vector2.new(point.X, point.Y) - cursor).Magnitude <= CURSOR_RADIUS_PIXELS then
-                if matchesCheckedKit(model) then
-                    count = maxFrontEntities() + 1
-                else
-                    count = count + 1
-                end
-            end
-        end
-        for _, entity in ipairs(entitylib.List) do
-            checkCharacter(entity.Character)
-            if count > maxFrontEntities() then return count end
-        end
-        for _, model in ipairs(workspace:GetChildren()) do
-            if model:IsA('Model') then checkCharacter(model) end
-            if count > maxFrontEntities() then return count end
-        end
-        return count
-    end
-
-    local function setPaused(value)
-        if paused == value then return end
-        paused = value
-        for _, parts in pairs(tracked) do
-            for part in pairs(parts) do
-                if part.Parent then
-                    pcall(function()
-                        bedwars.QueryUtil:setQueryIgnored(part, not paused)
-                    end)
-                end
-            end
-        end
-    end]==],
-        'pause state and front entity detection')
-    phaseReplace("local function ignorePart(part)\n\t\t\t\t\tpcall(function()",
-        "local function ignorePart(part)\n                    if paused then return end\n\t\t\t\t\tpcall(function()",
-        'prevent query ignores while paused')
-    phaseReplace("if callback then\n\n\t\t\t\tlocal function ignorePart",
-        "if callback then\n                pauseGeneration = pauseGeneration + 1\n                local generation = pauseGeneration\n                paused = false\n                setPaused(hasMiningToolEquipped() and countFrontEntities() > maxFrontEntities())\n\n\t\t\t\tlocal function ignorePart",
-        'enable state setup')
-    phaseReplace("setupAllCharacters()\n\t\t\t\tupdateCollision()\n",
-        [==[setupAllCharacters()
-                updateCollision()
-                task.spawn(function()
-                    while PhaseMine.Enabled and pauseGeneration == generation do
-                        setPaused(hasMiningToolEquipped() and countFrontEntities() > maxFrontEntities())
-                        task.wait(0.15)
-                    end
-                end)
-]==],
-        'independent pause monitor')
-    phaseReplace("\t\t\telse\n\t\t\t\tfor _, conn in ipairs(connections) do",
-        "\t\t\telse\n                pauseGeneration = pauseGeneration + 1\n                setPaused(false)\n\t\t\t\tfor _, conn in ipairs(connections) do",
-        'stop monitor and restore on disable')
-    -- Cursor-centered FOV checks use a 45-pixel radius in third person.
-    -- Screen-space FOV uses WorldToViewportPoint and the mouse's viewport position.
-    -- No stud-distance limit; entities and kits share the cursor FOV.
-    phaseReplace("Tooltip = 'mine OR build through players and npcs'\n\t})\nend)",
-        [==[Tooltip = 'mine OR build through players and npcs'
-    })
-    EntityLimitSlider = PhaseMine:CreateSlider({
-        Name = 'Entity Limit',
-        Min = 1,
-        Max = 5,
-        Default = 3,
-        Tooltip = 'how many things infront before it doesnt phasemine'
-    })
-    TreeCheck = PhaseMine:CreateToggle({
-        Name = 'TreeCheck',
-        Default = false,
-        Tooltip = 'checks if there is a big tree blocking'
-    })
-    HephCheck = PhaseMine:CreateToggle({
-        Name = 'HephCheck',
-        Default = false,
-        Tooltip = 'checks if theres a fat heph blocking'
-    })
-end)]==],
-        'PhaseMine settings slider')
-    phaseReplace("Name = 'PhaseMine',", "Name = 'LegitMine',", 'display name')
-    phaseReplace("    HephCheck = PhaseMine:CreateToggle({\n        Name = 'HephCheck',\n        Default = false,\n        Tooltip = 'checks if theres a fat heph blocking'\n    })", [==[    HephCheck = PhaseMine:CreateToggle({
-        Name = 'HephCheck',
-        Default = false,
-        Tooltip = 'checks if theres a fat heph blocking'
-    })
-    vape.ModuleAliases = vape.ModuleAliases or {}
-    vape.ModuleAliases.LegitMine = {'PhaseMine'}]==], 'search alias')
-    bedwarsSource = bedwarsSource:sub(1, first - 1) .. phaseSource .. bedwarsSource:sub(finish + 1)
 end
 -- Read-only local diagnostics. No remotes, combat hooks or damage modification.
 if gameFileId == 6872274481 then
