@@ -352,7 +352,7 @@ local filterCode = [==[
                     return box, close, label
                 end
 
-                local banBox, banClose, banLabel = createWarning(1, 'This setting may get you banned')
+                local banBox, banClose, banLabel = createWarning(1, 'This setting might get you banned')
                 local clipBox, clipClose, clipLabel = createWarning(2, 'This setting may get you banned if you clip yourself')
                 local dismissed = {ban = false, clip = false}
                 local priorSignature
@@ -433,6 +433,8 @@ local filterCode = [==[
                     if r ~= nil and r > 15 then addRisk('Reach') end
                     if airPct ~= nil and airPct > 85 then addRisk('AirReach') end
                     if fov ~= nil and (fov > 85 or (fov > 40 and not distanceMode)) then addRisk('SilentAim') end
+                    local legitMine = getModule('LegitMine') or getModule('PhaseMine')
+                    if legitMine and legitMine.Enabled then addRisk('LegitMine') end
                     local ban = #risky > 0
 
                     local renderNames = {
@@ -473,7 +475,7 @@ local filterCode = [==[
                                 dismissed.ban = false
                                 dismissed.clip = false
                             end
-                            banLabel.Text = 'This setting may get you banned: ' .. riskText
+                            banLabel.Text = 'This setting might get you banned: ' .. riskText
                             clipLabel.Text = 'This setting may get you banned if you clip yourself: ' .. renderText
                             local textService = game:GetService('TextService')
                             for _, pair in ipairs({{banBox, banLabel}, {clipBox, clipLabel}}) do
