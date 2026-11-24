@@ -297,7 +297,8 @@ local filterCode = [==[
                 warnings.BackgroundTransparency = 1
                 warnings.AnchorPoint = Vector2.new(1, 0)
                 warnings.Position = UDim2.new(1, -12, 0, 12)
-                warnings.Size = UDim2.fromOffset(242, 112)
+                warnings.Size = UDim2.fromOffset(340, 150)
+                warnings.AutomaticSize = Enum.AutomaticSize.Y
                 warnings.ZIndex = 100
                 warnings.Parent = click
 
@@ -310,7 +311,7 @@ local filterCode = [==[
                     local box = Instance.new('Frame')
                     box.Name = 'Warning' .. order
                     box.LayoutOrder = order
-                    box.Size = UDim2.new(1, 0, 0, 46)
+                    box.Size = UDim2.new(1, 0, 0, 52)
                     box.BackgroundColor3 = Color3.fromRGB(117, 23, 30)
                     box.BorderSizePixel = 0
                     box.Visible = false
@@ -348,11 +349,11 @@ local filterCode = [==[
                     close.Text = 'X'
                     close.ZIndex = 103
                     close.Parent = box
-                    return box, close
+                    return box, close, label
                 end
 
-                local banBox, banClose = createWarning(1, 'you can get banned for this')
-                local clipBox, clipClose = createWarning(2, 'if you clip this, you will get banned')
+                local banBox, banClose, banLabel = createWarning(1, 'This setting may get you banned')
+                local clipBox, clipClose, clipLabel = createWarning(2, 'This setting may get you banned if you clip yourself')
                 local dismissed = {ban = false, clip = false}
                 local priorSignature
 
@@ -419,44 +420,65 @@ local filterCode = [==[
                     local mode = selectedOption(silent, 'Mode', 'Target Mode', 'Targeting Mode') or ''
                     local distanceMode = normalize(mode):find('distance', 1, true) ~= nil
 
-                    local ban = (h ~= nil and h > 25 and r ~= nil and r > 13.5 and ping ~= nil and ping < 120)
-                        or (r ~= nil and r > 15)
-                        or (airPct ~= nil and airPct > 85)
-                        or (fov ~= nil and (fov > 85 or (fov > 40 and not distanceMode)))
+                    -- Attribute existing warning rules without changing their thresholds.
+                    local risky, rendered = {}, {}
+                    local seen = {}
+                    local function addRisk(name)
+                        if not seen[name] then seen[name] = true; table.insert(risky, name) end
+                    end
+                    if h ~= nil and h > 25 and r ~= nil and r > 13.5 and ping ~= nil and ping < 120 then
+                        addRisk('HitBoxes')
+                        addRisk('Reach')
+                    end
+                    if r ~= nil and r > 15 then addRisk('Reach') end
+                    if airPct ~= nil and airPct > 85 then addRisk('AirReach') end
+                    if fov ~= nil and (fov > 85 or (fov > 40 and not distanceMode)) then addRisk('SilentAim') end
+                    local ban = #risky > 0
 
-                    local render = false
                     local renderNames = {
                         ESP = true, KitESP = true, KitRender = true, NameTags = true,
                         BedPlates = true
                     }
+                    local renderSeen = {}
                     for _, modules in ipairs({vape.Modules or {}, (vape.Legit and vape.Legit.Modules) or {}}) do
                         for name, module in pairs(modules) do
                             if type(module) == 'table' and module.Enabled then
                                 local category = module.Category
                                 local categoryName = type(category) == 'table' and category.Name or category
-                                if renderNames[name] or categoryName == 'Render' then
-                                    render = true
-                                    break
+                                if (renderNames[name] or categoryName == 'Render') and not renderSeen[name] then
+                                    renderSeen[name] = true
+                                    table.insert(rendered, tostring(name))
                                 end
                             end
                         end
-                        if render then break end
                     end
+                    table.sort(risky)
+                    table.sort(rendered)
+                    local render = #rendered > 0
+                    local riskText = table.concat(risky, ', ')
+                    local renderText = table.concat(rendered, ', ')
                     return ban, render, table.concat({
                         tostring(reach and reach.Enabled), tostring(r), tostring(hitboxes and hitboxes.Enabled),
                         tostring(h), tostring(ping ~= nil and ping < 130), tostring(ping ~= nil and ping > 200), tostring(airPct),
-                        tostring(silent and silent.Enabled), tostring(fov), mode, tostring(render)
-                    }, '|')
+                        tostring(silent and silent.Enabled), tostring(fov), mode, riskText, renderText
+                    }, '|'), riskText, renderText
                 end
 
                 task.spawn(function()
                     while click.Parent and gui.Parent do
-                        local ok, ban, clip, signature = pcall(check)
+                        local ok, ban, clip, signature, riskText, renderText = pcall(check)
                         if ok then
                             if signature ~= priorSignature then
                                 priorSignature = signature
                                 dismissed.ban = false
                                 dismissed.clip = false
+                            end
+                            banLabel.Text = 'This setting may get you banned: ' .. riskText
+                            clipLabel.Text = 'This setting may get you banned if you clip yourself: ' .. renderText
+                            local textService = game:GetService('TextService')
+                            for _, pair in ipairs({{banBox, banLabel}, {clipBox, clipLabel}}) do
+                                local bounds = textService:GetTextSize(pair[2].Text, pair[2].TextSize, pair[2].Font, Vector2.new(303, 1000))
+                                pair[1].Size = UDim2.new(1, 0, 0, math.max(52, bounds.Y + 12))
                             end
                             banBox.Visible = ban and not dismissed.ban
                             clipBox.Visible = clip and not dismissed.clip
