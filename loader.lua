@@ -307,63 +307,214 @@ local filterCode = [==[
                 layout.Padding = UDim.new(0, 5)
                 layout.Parent = warnings
 
+                local tweenService = game:GetService('TweenService')
+                local textService = game:GetService('TextService')
+                local cards = {}
+                local function animate(obj, duration, props)
+                    local tween = tweenService:Create(obj, TweenInfo.new(duration, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), props)
+                    tween:Play()
+                    return tween
+                end
+
                 local function createWarning(order, message)
+                    local accent = order == 1 and Color3.fromRGB(255, 104, 112) or Color3.fromRGB(255, 178, 100)
                     local box = Instance.new('Frame')
                     box.Name = 'Warning' .. order
                     box.LayoutOrder = order
-                    box.Size = UDim2.new(1, 0, 0, 52)
-                    box.BackgroundColor3 = Color3.fromRGB(117, 23, 30)
-                    box.BorderSizePixel = 0
+                    box.Size = UDim2.new(1, 0, 0, 100)
+                    box.BackgroundTransparency = 1
                     box.Visible = false
                     box.ZIndex = 101
                     box.Parent = warnings
+
+                    local card = Instance.new('CanvasGroup')
+                    card.Name = 'Notification'
+                    card.Size = UDim2.fromScale(1, 1)
+                    card.BackgroundColor3 = Color3.fromRGB(36, 38, 45)
+                    card.BackgroundTransparency = 0.06
+                    card.GroupTransparency = 1
+                    card.BorderSizePixel = 0
+                    card.ZIndex = 102
+                    card.Parent = box
                     local corner = Instance.new('UICorner')
-                    corner.CornerRadius = UDim.new(0, 6)
-                    corner.Parent = box
+                    corner.CornerRadius = UDim.new(0, 14)
+                    corner.Parent = card
                     local stroke = Instance.new('UIStroke')
-                    stroke.Color = Color3.fromRGB(235, 75, 84)
+                    stroke.Color = Color3.fromRGB(95, 95, 105)
+                    stroke.Transparency = 0.38
                     stroke.Thickness = 1
-                    stroke.Parent = box
-                    local label = Instance.new('TextLabel')
-                    label.BackgroundTransparency = 1
-                    label.Position = UDim2.fromOffset(9, 4)
-                    label.Size = UDim2.new(1, -37, 1, -8)
-                    label.Font = Enum.Font.GothamMedium
-                    label.TextSize = 12
-                    label.TextWrapped = true
-                    label.TextXAlignment = Enum.TextXAlignment.Left
-                    label.TextYAlignment = Enum.TextYAlignment.Center
-                    label.TextColor3 = Color3.fromRGB(255, 243, 243)
-                    label.Text = message
-                    label.ZIndex = 102
-                    label.Parent = box
+                    stroke.Parent = card
+                    local gradient = Instance.new('UIGradient')
+                    gradient.Rotation = 90
+                    gradient.Color = ColorSequence.new(Color3.fromRGB(255,255,255), Color3.fromRGB(218,218,225))
+                    gradient.Parent = card
+
+                    local function label(parent, text, x, y, w, h, size, color, font)
+                        local obj = Instance.new('TextLabel')
+                        obj.BackgroundTransparency = 1
+                        obj.Position = UDim2.fromOffset(x, y)
+                        obj.Size = UDim2.fromOffset(w, h)
+                        obj.Font = font or Enum.Font.GothamMedium
+                        obj.TextSize = size
+                        obj.TextColor3 = color
+                        obj.TextXAlignment = Enum.TextXAlignment.Left
+                        obj.TextYAlignment = Enum.TextYAlignment.Center
+                        obj.Text = text
+                        obj.ZIndex = 103
+                        obj.Parent = parent
+                        return obj
+                    end
+                    local icon = Instance.new('TextLabel')
+                    icon.Size = UDim2.fromOffset(34, 34)
+                    icon.Position = UDim2.fromOffset(12, 12)
+                    icon.BackgroundColor3 = accent:Lerp(Color3.fromRGB(28, 29, 35), 0.76)
+                    icon.TextColor3 = accent
+                    icon.Text = '!'
+                    icon.Font = Enum.Font.GothamBold
+                    icon.TextSize = 23
+                    icon.BorderSizePixel = 0
+                    icon.ZIndex = 103
+                    icon.Parent = card
+                    local iconCorner = Instance.new('UICorner')
+                    iconCorner.CornerRadius = UDim.new(0, 10)
+                    iconCorner.Parent = icon
+                    label(card, order == 1 and 'Configuration warning' or 'Recording warning',
+                        56, 10, 240, 20, 14, Color3.fromRGB(250,250,252), Enum.Font.GothamBold)
+                    label(card, 'Elianware  ·  Risk alert', 56, 30, 240, 15, 10, Color3.fromRGB(166,169,180))
+                    local body = label(card, message .. '.', 12, 53, 316, 34, 12, Color3.fromRGB(235,235,240))
+                    body.TextWrapped = true
+                    body.TextYAlignment = Enum.TextYAlignment.Top
+
                     local close = Instance.new('TextButton')
                     close.Name = 'Dismiss'
-                    close.BackgroundTransparency = 1
-                    close.AnchorPoint = Vector2.new(1, 0)
-                    close.Position = UDim2.new(1, -5, 0, 4)
-                    close.Size = UDim2.fromOffset(22, 22)
-                    close.Font = Enum.Font.GothamBold
-                    close.TextSize = 16
-                    close.TextColor3 = Color3.fromRGB(255, 220, 220)
-                    close.Text = 'X'
-                    close.ZIndex = 103
-                    close.Parent = box
-                    return box, close, label
+                    close.BackgroundColor3 = Color3.fromRGB(79,81,90)
+                    close.BackgroundTransparency = 0.65
+                    close.Position = UDim2.new(1, -34, 0, 10)
+                    close.Size = UDim2.fromOffset(24, 24)
+                    close.Font = Enum.Font.GothamMedium
+                    close.TextSize = 17
+                    close.TextColor3 = Color3.fromRGB(212,214,222)
+                    close.Text = '×'
+                    close.AutoButtonColor = false
+                    close.ZIndex = 104
+                    close.Parent = card
+                    local closeCorner = Instance.new('UICorner')
+                    closeCorner.CornerRadius = UDim.new(1,0)
+                    closeCorner.Parent = close
+                    close.MouseEnter:Connect(function() animate(close, 0.12, {BackgroundTransparency = 0.2}) end)
+                    close.MouseLeave:Connect(function() animate(close, 0.12, {BackgroundTransparency = 0.65}) end)
+                    local line = Instance.new('Frame')
+                    line.BackgroundColor3 = accent
+                    line.BackgroundTransparency = 0.15
+                    line.BorderSizePixel = 0
+                    line.Position = UDim2.new(0,12,1,-5)
+                    line.Size = UDim2.new(1,-24,0,2)
+                    line.ZIndex = 103
+                    line.Parent = card
+                    local lineCorner = Instance.new('UICorner')
+                    lineCorner.CornerRadius = UDim.new(1,0)
+                    lineCorner.Parent = line
+                    cards[box] = {card = card, icon = icon, accent = accent, body = body, pills = {}, names = nil, wanted = false, generation = 0, height = 100}
+                    return box, close
                 end
 
-                local banBox, banClose, banLabel = createWarning(1, 'This setting might get you banned')
-                local clipBox, clipClose, clipLabel = createWarning(2, 'This setting may get you banned if you clip yourself')
+                local function pulse(state)
+                    state.pulse = (state.pulse or 0) + 1
+                    local id = state.pulse
+                    task.spawn(function()
+                        for _ = 1, 2 do
+                            if not state.wanted or state.pulse ~= id then break end
+                            animate(state.icon, 0.18, {BackgroundColor3 = state.accent:Lerp(Color3.fromRGB(28,29,35),0.35)})
+                            task.wait(0.18)
+                            if not state.wanted or state.pulse ~= id then break end
+                            animate(state.icon, 0.22, {BackgroundColor3 = state.accent:Lerp(Color3.fromRGB(28,29,35),0.76)})
+                            task.wait(0.22)
+                        end
+                    end)
+                end
+                local function setNames(box, names)
+                    local state = cards[box]
+                    if state.names == names then return end
+                    state.names = names
+                    local keep, ordered = {}, {}
+                    for name in string.gmatch(names, '[^,]+') do
+                        name = name:match('^%s*(.-)%s*$')
+                        if name ~= '' then keep[name] = true; table.insert(ordered, name) end
+                    end
+                    for name, pill in pairs(state.pills) do
+                        if not keep[name] then
+                            state.pills[name] = nil
+                            animate(pill, 0.16, {TextTransparency = 1, BackgroundTransparency = 1, Size = UDim2.fromOffset(0,22)})
+                            task.delay(0.17, function() pill:Destroy() end)
+                        end
+                    end
+                    local bodyHeight = math.max(16, textService:GetTextSize(state.body.Text,12,state.body.Font,Vector2.new(316,1000)).Y)
+                    state.body.Size = UDim2.fromOffset(316,bodyHeight)
+                    local x, y = 12, 53 + bodyHeight + 7
+                    local added = false
+                    for _, name in ipairs(ordered) do
+                        local width = math.min(316, math.ceil(textService:GetTextSize(name,11,Enum.Font.GothamMedium,Vector2.new(300,1000)).X)+18)
+                        if x + width > 328 then x = 12; y = y + 27 end
+                        local pill = state.pills[name]
+                        if not pill then
+                            added = true
+                            pill = Instance.new('TextLabel')
+                            pill.BackgroundColor3 = state.accent:Lerp(Color3.fromRGB(36,38,45),0.82)
+                            pill.BorderSizePixel = 0
+                            pill.Font = Enum.Font.GothamMedium
+                            pill.TextSize = 11
+                            pill.TextColor3 = state.accent:Lerp(Color3.new(1,1,1),0.25)
+                            pill.Text = name
+                            pill.TextTruncate = Enum.TextTruncate.AtEnd
+                            pill.ZIndex = 104
+                            pill.Position = UDim2.fromOffset(x,y)
+                            pill.Size = UDim2.fromOffset(0,22)
+                            pill.TextTransparency = 1
+                            pill.BackgroundTransparency = 1
+                            pill.Parent = state.card
+                            local rounding = Instance.new('UICorner')
+                            rounding.CornerRadius = UDim.new(0,7)
+                            rounding.Parent = pill
+                            state.pills[name] = pill
+                        end
+                        animate(pill,0.18,{Position = UDim2.fromOffset(x,y), Size = UDim2.fromOffset(width,22), TextTransparency = 0, BackgroundTransparency = 0})
+                        x = x + width + 5
+                    end
+                    state.height = math.max(86, y + (#ordered > 0 and 22 or 0) + 12)
+                    animate(box,0.22,{Size = UDim2.new(1,0,0,state.height)})
+                    if added and state.wanted then pulse(state) end
+                end
+                local function showWarning(box, wanted)
+                    local state = cards[box]
+                    if state.wanted == wanted then return end
+                    state.wanted = wanted
+                    state.generation = state.generation + 1
+                    local id = state.generation
+                    if wanted then
+                        box.Visible = true
+                        state.card.Position = UDim2.fromOffset(20, 0)
+                        state.card.GroupTransparency = 1
+                        animate(state.card, 0.25, {Position = UDim2.fromOffset(0,0), GroupTransparency = 0})
+                        pulse(state)
+                    else
+                        animate(state.card, 0.2, {Position = UDim2.fromOffset(20,0), GroupTransparency = 1})
+                        task.delay(0.21,function()
+                            if state.generation == id and box.Parent then box.Visible = false end
+                        end)
+                    end
+                end
+
+                local banBox, banClose = createWarning(1, 'This setting might get you banned')
+                local clipBox, clipClose = createWarning(2, 'These modules may be visible in recordings')
                 local dismissed = {ban = false, clip = false}
                 local priorSignature
-
                 banClose.MouseButton1Click:Connect(function()
                     dismissed.ban = true
-                    banBox.Visible = false
+                    showWarning(banBox, false)
                 end)
                 clipClose.MouseButton1Click:Connect(function()
                     dismissed.clip = true
-                    clipBox.Visible = false
+                    showWarning(clipBox, false)
                 end)
 
                 local function normalize(value)
@@ -475,15 +626,10 @@ local filterCode = [==[
                                 dismissed.ban = false
                                 dismissed.clip = false
                             end
-                            banLabel.Text = 'This setting might get you banned: ' .. riskText
-                            clipLabel.Text = 'This setting may get you banned if you clip yourself: ' .. renderText
-                            local textService = game:GetService('TextService')
-                            for _, pair in ipairs({{banBox, banLabel}, {clipBox, clipLabel}}) do
-                                local bounds = textService:GetTextSize(pair[2].Text, pair[2].TextSize, pair[2].Font, Vector2.new(303, 1000))
-                                pair[1].Size = UDim2.new(1, 0, 0, math.max(52, bounds.Y + 12))
-                            end
-                            banBox.Visible = ban and not dismissed.ban
-                            clipBox.Visible = clip and not dismissed.clip
+                            setNames(banBox, riskText)
+                            setNames(clipBox, renderText)
+                            showWarning(banBox, ban and not dismissed.ban)
+                            showWarning(clipBox, clip and not dismissed.clip)
                         end
                         task.wait(0.25)
                     end
