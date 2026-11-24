@@ -257,7 +257,7 @@ local filterCode = [==[
             local ok, err = pcall(function()
                 do
                     local api = vape
-                    local category = api and api.Categories['Experimental (Ban)']
+                    local category = api and api.Categories and api.Categories.Legit
                     if category then
                         local players = game:GetService('Players')
                         local runService = game:GetService('RunService')
@@ -378,7 +378,7 @@ local filterCode = [==[
                             Name = 'FallDamageHUD',
                             Tooltip = 'Estimates fall damage in the next two blocks. Experimental damage formula.',
                             Function = function(enabled)
-                                if not enabled or not module.Enabled then return end
+                                if not enabled then return end
                                 local playerGui = player:FindFirstChildOfClass('PlayerGui')
                                 if not playerGui then return end
                                 local existing = playerGui:FindFirstChild('ElianFallDamageHUD')
@@ -446,15 +446,17 @@ local filterCode = [==[
                                         scanElapsed = 0
                                         bar = findHealthBar(playerGui, screen, humanoid)
                                     end
-                                    if not bar or not bar.Parent or not visible(bar) then
-                                        label.Visible = false
-                                        return
+                                    local sourceGui = bar and bar.Parent and visible(bar)
+                                        and bar:FindFirstAncestorOfClass('ScreenGui')
+                                    if sourceGui then
+                                        screen.IgnoreGuiInset = sourceGui.IgnoreGuiInset
+                                        pcall(function() screen.ScreenInsets = sourceGui.ScreenInsets end)
+                                        screen.DisplayOrder = sourceGui.DisplayOrder + 1
+                                    else
+                                        bar = nil
+                                        screen.IgnoreGuiInset = false
+                                        screen.DisplayOrder = 10
                                     end
-                                    local sourceGui = bar:FindFirstAncestorOfClass('ScreenGui')
-                                    if not sourceGui then label.Visible = false return end
-                                    screen.IgnoreGuiInset = sourceGui.IgnoreGuiInset
-                                    pcall(function() screen.ScreenInsets = sourceGui.ScreenInsets end)
-                                    screen.DisplayOrder = sourceGui.DisplayOrder + 1
                 
                                     -- Keep a fresh estimate outside a fall, including during the landing hold.
                                     -- During a fall, use the snapshot rather than the shrinking remaining distance.
@@ -477,10 +479,14 @@ local filterCode = [==[
                                         label.Visible = false
                                         return
                                     end
-                                    local pos, size = bar.AbsolutePosition, bar.AbsoluteSize
-                                    local base = screen.AbsolutePosition
-                                    label.Position = UDim2.fromOffset(
-                                        pos.X + size.X * 0.5 - base.X, pos.Y - base.Y - 4)
+                                    if bar then
+                                        local pos, size = bar.AbsolutePosition, bar.AbsoluteSize
+                                        local base = screen.AbsolutePosition
+                                        label.Position = UDim2.fromOffset(
+                                            pos.X + size.X * 0.5 - base.X, pos.Y - base.Y - 4)
+                                    else
+                                        label.Position = UDim2.new(0.5, 0, 0.85, -4)
+                                    end
                                     label.Text = damage == math.huge and 'Void'
                                         or (damage == -1 and 'Safe')
                                         or ('Est. fall damage: ' .. tostring(damage) .. ' HP')
